@@ -20,6 +20,7 @@ Personal video library. Paste any video URL, it plays inside the app. No externa
 - **HLS streams** (`.m3u8`) via hls.js
 - **Direct video files** (`.mp4`, `.webm`, `.mov`, `.m4v`, `.ogg`, `.mkv`, etc.) — full `<video>` controls, watch progress saved, Picture-in-Picture
 - **Images** (`.jpg`, `.png`, `.gif`, `.webp`, etc.) — full-screen view
+- **Any other webpage** — last-resort server-side extractor tries to find a video URL in `<video>` tags, `og:video`/`twitter:player:stream` meta, or JSON-LD `VideoObject` markup. Works on a real chunk of "won't play" sites. Fails quietly on sites with IP-bound tokens, expiring signatures that beat the round-trip, or anti-bot perimeters.
 
 If a URL isn't one of these, the player tells you it can't be embedded. Nothing silently fails.
 
@@ -58,6 +59,23 @@ YouTube and direct video files save progress to Supabase. The "Continue" tab sur
 ## Twitch embeds
 
 Twitch requires a `parent` URL param matching the embed host. The Player reads `window.location.hostname` at runtime, so it works on localhost, your Vercel preview URLs, and your prod domain without config.
+
+## The webpage extractor (`/api/extract`)
+
+When you paste a URL that isn't a known source, the player calls `/api/extract`. The server fetches the page, parses the HTML, and looks for video URLs in:
+
+- `<video src>` / `<video><source src></video>` (with resolution from `size`/`label`/`data-res` attrs)
+- `<meta property="og:video">`, `og:video:url`, `og:video:secure_url`
+- `<meta name="twitter:player:stream">`
+- JSON-LD `VideoObject` (`contentUrl` / `embedUrl`)
+- Inline `.mp4` / `.webm` / `.m3u8` URLs in `<script>` strings
+
+Highest resolution wins. Result is never cached (tokens expire). On failure you get a clear error and an "Open original" link.
+
+**What it won't fix:**
+- **IP-bound CDN tokens.** Server fetches from Vercel's IP, browser plays from yours. Some CDNs check, return 403. Architectural problem, not a parser problem.
+- **Cloudflare / Datadome / PerimeterX challenges.** These return interstitial HTML, not the real page. The fix is a headless browser worker (Playwright on Render/Railway), intentionally out of scope here.
+- **Sites that ship video URLs only in client-side JS that runs after page load.** The parser sees server-rendered HTML only.
 
 ## What's NOT here
 

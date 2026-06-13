@@ -50,12 +50,52 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [isPiP, setIsPiP]   = useState(false);
   const [parent, setParent] = useState("localhost");
 
+  // Extraction state (used when source.id === "extract")
+  const [extracted, setExtracted] = useState(null); // { url, type, resolution } | null
+  const [extractErr, setExtractErr] = useState("");
+  const [extracting, setExtracting] = useState(false);
+
   // Set Twitch parent param from current hostname (required by Twitch embeds)
   useEffect(() => {
     if (typeof window !== "undefined") setParent(window.location.hostname || "localhost");
   }, []);
 
-  const embed = getEmbed(item.url, { muted, parent });
+  const baseEmbed = getEmbed(item.url, { muted, parent });
+
+  // When the source is the catch-all "extract", call /api/extract and
+  // synthesize a video/hls embed from whatever it returns.
+  useEffect(() => {
+    if (baseEmbed?.kind !== "extract") return;
+    let cancelled = false;
+    setExtracted(null); setExtractErr(""); setExtracting(true);
+    fetch(`/api/extract?url=${encodeURIComponent(item.url)}`)
+      .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (cancelled) return;
+        if (!ok || !j.sources?.length) {
+          setExtractErr(j.error || "Could not find a video on that page.");
+        } else {
+          // sources arrive sorted by resolution desc; pick highest
+          setExtracted(j.sources[0]);
+        }
+      })
+      .catch((e) => { if (!cancelled) setExtractErr(e.message || "Extraction failed."); })
+      .finally(() => { if (!cancelled) setExtracting(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.url, baseEmbed?.kind]);
+
+  // Effective embed: extraction result overrides "extract" placeholder
+  const embed = (() => {
+    if (baseEmbed?.kind !== "extract") return baseEmbed;
+    if (!extracted) return baseEmbed; // still loading or errored
+    const isHls = /\.(m3u8)(\?|$)/i.test(extracted.url) ||
+                  /mpegurl/i.test(extracted.type || "");
+    return isHls
+      ? { kind: "hls",   src: extracted.url, source: baseEmbed.source }
+      : { kind: "video", src: extracted.url, source: baseEmbed.source };
+  })();
+
   const hasNext = currentIdx < items.length - 1;
   const hasPrev = currentIdx > 0;
 
@@ -230,6 +270,27 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           <Icon name="alert" size={28} style={{ color: T.text3, marginBottom: 12 }} />
           <div style={{ fontSize: 14, color: T.text2, marginBottom: 6 }}>This URL can't be played inside the vault.</div>
           <div style={{ fontSize: 11, color: T.text4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.url}</div>
+        </div>
+      );
+    }
+
+    if (embed.kind === "extract") {
+      if (extracting) {
+        return (
+          <div style={{ textAlign: "center", padding: "60px 30px" }}>
+            <div style={{ width: 32, height: 32, border: "2px solid rgba(255,255,255,0.1)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
+            <div style={{ fontSize: 13, color: T.text2 }}>Looking for a video on that page...</div>
+          </div>
+        );
+      }
+      return (
+        <div style={{ textAlign: "center", padding: "32px 24px", maxWidth: 360 }}>
+          <Icon name="alert" size={28} style={{ color: T.text3, marginBottom: 12 }} />
+          <div style={{ fontSize: 14, color: T.text2, marginBottom: 8 }}>{extractErr || "Couldn't find a playable video."}</div>
+          <div style={{ fontSize: 11, color: T.text4, marginBottom: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.url}</div>
+          <a href={item.url} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`, borderRadius: 20, color: T.text1, fontSize: 12, textDecoration: "none" }}>
+            Open original <Icon name="external" size={12} />
+          </a>
         </div>
       );
     }
