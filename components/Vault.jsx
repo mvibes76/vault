@@ -6,6 +6,7 @@ import ConfigModal from "./ConfigModal";
 import Sidebar from "./Sidebar";
 import BottomNav from "./BottomNav";
 import QuickAddModal from "./QuickAddModal";
+import InAppBrowser from "./InAppBrowser";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { fetchTabData, itemKey, sourceIdOf } from "@/lib/utils";
@@ -52,6 +53,7 @@ export default function Vault() {
   const [showConfig, setShowConfig]     = useState(false);
   const [showSort, setShowSort]         = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   const [activeItem, setActiveItem]       = useState(null);
   const [activeItemIdx, setActiveItemIdx] = useState(0);
@@ -404,6 +406,7 @@ export default function Vault() {
             onSort={() => setShowSort(!showSort)} sortBy={sortBy}
             onSync={null}
             onQuickAdd={() => setShowQuickAdd(true)}
+            onBrowser={() => setShowBrowser(true)}
           />
         ) : (
           <DesktopTopBar
@@ -413,6 +416,7 @@ export default function Vault() {
             onSync={null} syncing={syncing}
             sortBy={sortBy} onSortChange={setSortBy}
             onQuickAdd={() => setShowQuickAdd(true)}
+            onBrowser={() => setShowBrowser(true)}
             installPrompt={installPrompt} onInstall={handleInstall}
           />
         )}
@@ -481,7 +485,8 @@ export default function Vault() {
       {isMobile && <BottomNav activeTab={activeBottomTab} onTab={handleBottomTab} />}
 
       {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} />}
-      {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} />}
+      {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} onCreateFolder={handleCreateFolder} />}
+      {showBrowser && <InAppBrowser onSave={handleQuickAdd} onClose={() => setShowBrowser(false)} folders={folders} isMobile={isMobile} onCreateFolder={handleCreateFolder} />}
 
       {activeItem && (
         <Player
@@ -511,7 +516,7 @@ export default function Vault() {
 
 // ── Layout pieces ────────────────────────────────────────────────────────────
 
-function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onSync, onQuickAdd }) {
+function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onSync, onQuickAdd, onBrowser }) {
   return (
     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100 }}>
       <button onClick={onMenu} style={iconBtn}><Icon name="menu" size={18} /></button>
@@ -520,6 +525,7 @@ function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef,
         : <div style={{ flex: 1, fontSize: 15, fontWeight: 500, color: T.text1, letterSpacing: -0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
       }
       {onSort && <button onClick={onSort} style={{ ...iconBtn, background: sortBy !== "default" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.06)" }}><Icon name="sort" size={16} /></button>}
+      {onBrowser && <button onClick={onBrowser} style={iconBtn} title="Browser"><Icon name="search" size={16} /></button>}
       {onQuickAdd && <button onClick={onQuickAdd} style={iconBtn} title="Add video"><Icon name="addCircle" size={16} /></button>}
       {onSync && <button onClick={onSync} disabled={syncing} style={iconBtn} title="Sync"><Icon name="sync" size={16} style={{ animation: syncing ? "spin 0.8s linear infinite" : "none" }} /></button>}
       <button onClick={onSearch} style={iconBtn}><Icon name="search" size={16} /></button>
@@ -527,7 +533,7 @@ function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef,
   );
 }
 
-function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onSync, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall }) {
+function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onSync, syncing, sortBy, onSortChange, onQuickAdd, onBrowser, installPrompt, onInstall }) {
   const [showSortDrop, setShowSortDrop] = useState(false);
   return (
     <div style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100, gap: 12, flexWrap: "wrap" }}>
@@ -558,6 +564,7 @@ function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onVie
             </button>
           ))}
         </div>
+        <button onClick={onBrowser} style={{ ...iconBtn, borderRadius: 7 }} title="Browser"><Icon name="search" size={16} /></button>
         <button onClick={onQuickAdd} style={{ ...iconBtn, borderRadius: 7 }} title="Add video"><Icon name="addCircle" size={16} /></button>
         {installPrompt && <button onClick={onInstall} style={{ ...iconBtn, borderRadius: 7 }} title="Install app"><Icon name="download" size={15} /></button>}
         {onSync && <button onClick={onSync} disabled={syncing} style={iconBtn}><Icon name="sync" size={14} style={{ animation: syncing ? "spin 0.8s linear infinite" : "none" }} /></button>}

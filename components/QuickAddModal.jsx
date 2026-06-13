@@ -5,7 +5,7 @@ import { itemKey } from "@/lib/utils";
 import { getSourceMeta } from "@/lib/sources";
 import { T } from "@/lib/theme";
 
-export default function QuickAddModal({ onAdd, onClose, folders = [] }) {
+export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFolder }) {
   const [url, setUrl]     = useState("");
   const [title, setTitle] = useState("");
   const [note, setNote]   = useState("");
@@ -13,6 +13,10 @@ export default function QuickAddModal({ onAdd, onClose, folders = [] }) {
   const [folder, setFolder] = useState("");
   const [pasting, setPasting] = useState(false);
   const [preflight, setPreflight] = useState({ state: "idle", msg: "" }); // idle | checking | ok | fail
+  const [metadata, setMetadata] = useState(null);
+  const [metadataState, setMetadataState] = useState("idle");
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const urlRef = useRef(null);
 
   // Read clipboard on mount
@@ -59,6 +63,29 @@ export default function QuickAddModal({ onAdd, onClose, folders = [] }) {
     return () => { cancelled = true; clearTimeout(t); };
   }, [url, isKnown, isExtract]);
 
+  // Metadata prefill: reads title/description/thumbnail server-side and fills empty fields.
+  useEffect(() => {
+    const target = url.trim();
+    if (!/^https?:\/\//i.test(target)) { setMetadata(null); setMetadataState("idle"); return; }
+    let cancelled = false;
+    setMetadataState("checking");
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/metadata?url=${encodeURIComponent(target)}`);
+        const j = await r.json();
+        if (cancelled) return;
+        if (!r.ok) throw new Error(j.error || "Metadata unavailable");
+        setMetadata(j);
+        setMetadataState("ok");
+        setTitle((prev) => prev || j.title || "");
+        setNote((prev) => prev || j.description || "");
+      } catch {
+        if (!cancelled) { setMetadata(null); setMetadataState("fail"); }
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [url]);
+
   const canAdd = /^https?:\/\//i.test(url.trim());
 
   const handlePaste = async () => {
@@ -68,6 +95,20 @@ export default function QuickAddModal({ onAdd, onClose, folders = [] }) {
       if (text?.trim()) setUrl(text.trim());
     } catch {}
     setPasting(false);
+  };
+
+
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name || creatingFolder) return;
+    setCreatingFolder(true);
+    try {
+      await onCreateFolder?.(name);
+      setFolder(name);
+      setNewFolderName("");
+    } finally {
+      setCreatingFolder(false);
+    }
   };
 
   const handleAdd = async () => {
@@ -80,6 +121,9 @@ export default function QuickAddModal({ onAdd, onClose, folders = [] }) {
       note: note.trim(),
       tags: tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
       source: meta?.id,
+      thumbnail: metadata?.thumbnail || "",
+      type: metadata?.type || "link",
+      siteName: metadata?.siteName || "",
       folder: folder || null,
       tab: folder || "Vault Library",
       isVaultItem: true,
@@ -138,20 +182,62 @@ export default function QuickAddModal({ onAdd, onClose, folders = [] }) {
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
           />
 
-          <select
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
-            style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
-          >
-            <option value="" style={{ background: "#111" }}>No folder</option>
-            {folders.map((f) => <option key={f.name} value={f.name} style={{ background: "#111" }}>{f.name}</option>)}
-          </select>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+            <select
+              value={folder}
+              onChange={(e) => setFolder(e.target.value)}
+              style={{ minWidth: 0, padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
+            >
+              <option value="" style={{ background: "#111" }}>No folder</option>
+              {folders.map((f) => <option key={f.name} value={f.name} style={{ background: "#111" }}>{f.name}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={() => setNewFolderName((v) => v ? "" : " ")}
+              style={{ padding: "0 12px", background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 12, fontWeight: 700 }}
+              title="Add folder"
+            >
+              <Icon name="plus" size={14} /> Folder
+            </button>
+          </div>
+
+          {newFolderName !== "" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+              <input
+                value={newFolderName.trimStart()}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="New folder name"
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleCreateFolder(); } }}
+                style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
+              />
+              <button
+                type="button"
+                onClick={handleCreateFolder}
+                disabled={!newFolderName.trim() || creatingFolder}
+                style={{ padding: "0 14px", background: newFolderName.trim() ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`, borderRadius: 10, color: newFolderName.trim() ? T.text1 : T.text4, cursor: newFolderName.trim() ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 700 }}
+              >
+                {creatingFolder ? "Adding..." : "Add"}
+              </button>
+            </div>
+          )}
 
           <input
             value={note} onChange={(e) => setNote(e.target.value)}
             placeholder="Note (optional)"
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
           />
+
+          {metadata?.thumbnail && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", padding: 8, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: `1px solid ${T.borderSub}` }}>
+              <img src={`/api/media?url=${encodeURIComponent(metadata.thumbnail)}`} alt="" style={{ width: 72, height: 44, objectFit: "cover", borderRadius: 7, flexShrink: 0 }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{metadata.title || "Metadata found"}</div>
+                <div style={{ fontSize: 10, color: T.text4, marginTop: 2 }}>{metadata.siteName || "Link preview"}</div>
+              </div>
+            </div>
+          )}
+
+          {url && metadataState === "checking" && <div style={{ color: T.text4, fontSize: 11 }}>Reading title and preview...</div>}
 
           {/* Detected source + pre-flight status */}
           {url && meta && (

@@ -436,6 +436,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       const wrap =
         embed.sizing === "portrait" ? stagePortrait :
         embed.sizing === "tall"     ? stageTall :
+        embed.sizing === "drive"    ? stageDrive(isFullscreen) :
                                       stageWide;
       // "tall" content (Reddit posts, Facebook embeds) often needs scroll
       // inside the iframe to surface video controls hidden below the fold.
@@ -637,6 +638,14 @@ const stageTall = {
   borderRadius: 10,
   overflow: "hidden",
 };
+
+const stageDrive = (fullscreen) => ({
+  width: fullscreen ? "100vw" : "min(96vw, 980px)",
+  height: fullscreen ? "100vh" : "min(78vh, 860px)",
+  background: "#000",
+  borderRadius: fullscreen ? 0 : 10,
+  overflow: "hidden",
+});
 
 const frameInner = {
   width: "100%",

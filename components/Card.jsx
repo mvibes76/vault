@@ -67,7 +67,7 @@ export default function Card({
         background: T.bgCard,
         border: `1px solid ${selected ? T.borderHov : T.border}`,
         borderRadius: T.r10,
-        overflow: "hidden",
+        overflow: "visible",
         cursor: "pointer",
         transition: "border-color 0.12s",
       }}
@@ -164,10 +164,10 @@ function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAs
       </button>
       {menuOpen && (
         <div onClick={(e) => e.stopPropagation()} style={{
-          position: "absolute", top: 28, right: 0, zIndex: 50,
-          background: T.bgMenu, border: `1px solid ${T.border}`,
+          position: "absolute", top: 42, right: 0, zIndex: 3000,
+          background: "rgba(18,18,18,0.98)", border: `1px solid ${T.border}`, backdropFilter: "blur(18px)",
           borderRadius: 10, boxShadow: "0 12px 36px rgba(0,0,0,0.6)",
-          minWidth: 180, padding: 4,
+          minWidth: 210, padding: 6,
         }}>
           <MenuItem icon="star" label={fav ? "Unfavorite" : "Favorite"} onClick={() => { onToggleFavorite?.(item.key, fav); setMenuOpen(false); }} />
           <MenuItem icon="check" label="Mark watched" onClick={() => { onMarkWatched?.(item.key); setMenuOpen(false); }} />
@@ -183,10 +183,18 @@ function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAs
           {folders.map((f) => (
             <MenuItem key={f.name} icon="folder" label={f.name} onClick={() => { onAssignFolder?.(item.key, f.name); setMenuOpen(false); }} />
           ))}
-          {isQuickAdd && <>
-            <div style={{ height: 1, background: T.borderSub, margin: "4px 0" }} />
-            <MenuItem icon="trash" label="Remove" danger onClick={() => { onRemoveQuickAdd?.(item.key); setMenuOpen(false); }} />
-          </>}
+          <div style={{ height: 1, background: T.borderSub, margin: "4px 0" }} />
+          <MenuItem
+            icon="trash"
+            label="Delete item"
+            danger
+            onClick={() => {
+              const ok = window.confirm("Delete this item from your vault? This will also remove it from the Vault Library sheet mirror when the webhook is configured.");
+              if (!ok) return;
+              onRemoveQuickAdd?.(item.key);
+              setMenuOpen(false);
+            }}
+          />
         </div>
       )}
     </div>

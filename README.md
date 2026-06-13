@@ -155,3 +155,11 @@ Highest resolution wins. Result is never cached (tokens expire). On failure you 
 - No audio/music player. Audio files won't load.
 - No image gallery scraping. Just direct image URLs.
 - No Google Drive folder browser. Open the folder externally if you need to.
+
+## v13 browser layer
+
+The app now includes a lightweight in-app browser for quick search and link capture. Use the browser button in the top bar to search/paste a URL, preview it when the site allows iframe loading, and save the current page into Supabase. The browser keeps local device history and supports deleting one item or clearing all history.
+
+The regular Add modal and the in-app browser both use `/api/metadata` to prefill title, notes, thumbnail, site name, and link type before saving.
+
+Some websites block iframe previews. That is normal. The save flow still works because metadata is fetched server-side through the safe URL layer.
