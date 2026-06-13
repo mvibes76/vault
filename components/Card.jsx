@@ -7,7 +7,7 @@ import { getThumb, getSourceMeta } from "@/lib/sources";
 export default function Card({
   item, onOpen, viewMode = "grid",
   userData, onToggleFavorite, folders = [], onAssignFolder,
-  isMobile, onRemoveQuickAdd, onMarkWatched,
+  isMobile, onRemoveQuickAdd, onMarkWatched, onSetRating,
   onSelect, selected,
 }) {
   const meta  = getSourceMeta(item.url);
@@ -16,6 +16,7 @@ export default function Card({
   const fav   = !!u.favorite;
   const progress = u.progress > 0 && u.duration > 0 ? Math.min(1, u.progress / u.duration) : 0;
   const watched = progress > 0.95;
+  const rating = u.rating || 0;
   const isQuickAdd = !!item.isQuickAdd || item.tab === "Quick Adds";
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -48,9 +49,9 @@ export default function Card({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, color: T.text1, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title || item.url}</div>
-          <div style={{ fontSize: 11, color: T.text4, marginTop: 2 }}>{meta.name}{watched ? " • watched" : ""}</div>
+          <div style={{ fontSize: 11, color: T.text4, marginTop: 2 }}>{meta.name}{rating ? ` • ★ ${rating}` : ""}{watched ? " • watched" : ""}</div>
         </div>
-        <CardMenuButton {...{ item, fav, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, menuOpen, setMenuOpen, menuRef }} />
+        <CardMenuButton {...{ item, fav, rating, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }} />
       </div>
     );
   }
@@ -106,6 +107,10 @@ export default function Card({
           {meta.id === "extract" && <span style={{ opacity: 0.7 }}>·?</span>}
         </div>
 
+        {rating > 0 && (
+          <div style={{ position: "absolute", bottom: 8, left: 8, padding: "3px 7px", borderRadius: 999, background: "rgba(0,0,0,0.62)", border: "1px solid rgba(255,255,255,0.12)", color: T.amber, fontSize: 10, fontWeight: 700, backdropFilter: "blur(8px)" }}>★ {rating}</div>
+        )}
+
         {/* Favorite */}
         {fav && (
           <div style={{ position: "absolute", top: 8, right: 8, padding: 4, background: "rgba(0,0,0,0.55)", borderRadius: "50%", backdropFilter: "blur(8px)", color: T.amber }}>
@@ -135,11 +140,9 @@ export default function Card({
             <div style={{ fontSize: 13, fontWeight: 500, color: T.text1, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
               {item.title || item.url}
             </div>
-            {item.tab && item.tab !== "Quick Adds" && (
-              <div style={{ fontSize: 10, color: T.text4, marginTop: 3 }}>{item.tab}</div>
-            )}
+            <div style={{ fontSize: 10, color: T.text4, marginTop: 3 }}>{rating ? `★ ${rating}` : (item.folder || item.tab || "")}</div>
           </div>
-          <CardMenuButton {...{ item, fav, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, menuOpen, setMenuOpen, menuRef }} />
+          <CardMenuButton {...{ item, fav, rating, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }} />
         </div>
       )}
 
@@ -150,14 +153,14 @@ export default function Card({
   );
 }
 
-function CardMenuButton({ item, fav, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, menuOpen, setMenuOpen, menuRef }) {
+function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }) {
   return (
     <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
       <button
         onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-        style={{ background: "rgba(255,255,255,0.05)", border: "none", color: T.text3, cursor: "pointer", borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center" }}
+        style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.12)", color: T.text1, cursor: "pointer", borderRadius: "50%", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 22px rgba(0,0,0,0.35)" }}
       >
-        <Icon name="more" size={14} />
+        <Icon name="more" size={18} />
       </button>
       {menuOpen && (
         <div onClick={(e) => e.stopPropagation()} style={{
@@ -168,7 +171,15 @@ function CardMenuButton({ item, fav, folders, onToggleFavorite, onAssignFolder, 
         }}>
           <MenuItem icon="star" label={fav ? "Unfavorite" : "Favorite"} onClick={() => { onToggleFavorite?.(item.key, fav); setMenuOpen(false); }} />
           <MenuItem icon="check" label="Mark watched" onClick={() => { onMarkWatched?.(item.key); setMenuOpen(false); }} />
+          <div style={{ height: 1, background: T.borderSub, margin: "4px 0" }} />
+          <div style={{ padding: "7px 10px 5px", color: T.text4, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>Rating</div>
+          <div style={{ display: "flex", gap: 2, padding: "0 8px 6px" }}>
+            {[1,2,3,4,5].map((n) => (
+              <button key={n} onClick={() => { onSetRating?.(item.key, rating === n ? null : n); setMenuOpen(false); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 2 }}>★</button>
+            ))}
+          </div>
           {folders.length > 0 && <div style={{ height: 1, background: T.borderSub, margin: "4px 0" }} />}
+          <MenuItem icon="folder" label="No folder" onClick={() => { onAssignFolder?.(item.key, null); setMenuOpen(false); }} />
           {folders.map((f) => (
             <MenuItem key={f.name} icon="folder" label={f.name} onClick={() => { onAssignFolder?.(item.key, f.name); setMenuOpen(false); }} />
           ))}

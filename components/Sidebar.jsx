@@ -93,8 +93,9 @@ export default function Sidebar({
         <NavItem {...np} id="all" icon="home" label="Everything" count={counts.all} />
         <NavItem {...np} id="favorites" icon="star" label="Favorites" count={counts.favorites} />
         <NavItem {...np} id="continue" icon="clock" label="Continue" count={counts.continue} />
+        <NavItem {...np} id="rated" icon="star" label="Rated" count={counts.rated} />
 
-        {/* Tabs from sheet */}
+        {/* Legacy tabs disabled in v12. Folders are the native tab-like function now. */}
         {tabs.length > 0 && (
           <>
             <SectionLabel collapsed={collapsed}>Tabs</SectionLabel>

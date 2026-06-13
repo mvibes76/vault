@@ -46,12 +46,15 @@ function loadTwitterWidgets(cb) {
 
 // ─── Main Player ────────────────────────────────────────────────────────────
 
-export default function Player({ item, items = [], currentIdx = 0, onNavigate, onClose, userId, resumeAt = 0 }) {
+export default function Player({ item, items = [], currentIdx = 0, onNavigate, onClose, userId, resumeAt = 0, rating = 0, onRate, onAddMoment }) {
   const [muted, setMuted]   = useState(false);
   const [isPiP, setIsPiP]   = useState(false);
   const [parent, setParent] = useState("localhost");
   const [useRelay, setUseRelay] = useState(false);
   const [relayReason, setRelayReason] = useState("");
+  const [enhanceMode, setEnhanceMode] = useState("off");
+  const [qualityLevels, setQualityLevels] = useState([]);
+  const [quality, setQuality] = useState("auto");
 
   // Extraction state (used when source.id === "extract")
   const [extracted, setExtracted] = useState(null); // { url, type, resolution } | null
@@ -292,6 +295,10 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         hlsRef.current = hls;
         hls.loadSource(mediaSrc);
         hls.attachMedia(v);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          const levels = (hls.levels || []).map((l, idx) => ({ idx, height: l.height, bitrate: l.bitrate })).filter((l) => l.height || l.bitrate);
+          setQualityLevels(levels);
+        });
         if (resumeAt > 2) v.currentTime = resumeAt;
         v.play().catch(() => {});
         // Hand fatal errors (mostly expired-token segment 403s) to the
@@ -309,6 +316,12 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaSrc]);
 
+  useEffect(() => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    hls.currentLevel = quality === "auto" ? -1 : Number(quality);
+  }, [quality]);
+
   // ── Direct video resume ─────────────────────────────────────────────────
   useEffect(() => {
     if (embed?.kind === "video" && videoRef.current && resumeAt > 2) {
@@ -316,6 +329,12 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaSrc]);
+
+  useEffect(() => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    hls.currentLevel = quality === "auto" ? -1 : Number(quality);
+  }, [quality]);
 
   // ── Periodic progress save for direct/HLS video ────────────────────────
   const onTimeUpdate = () => {
@@ -362,6 +381,14 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     if (Math.abs(dx) < 60) return;
     if (dx > 0 && hasNext) onNavigate?.(currentIdx + 1);
     if (dx < 0 && hasPrev) onNavigate?.(currentIdx - 1);
+  };
+
+  const enhanceFilter = enhanceMode === "crisp" ? "contrast(1.08) saturate(1.05) brightness(1.02)" : enhanceMode === "cinema" ? "contrast(1.12) saturate(0.96) brightness(0.98)" : enhanceMode === "soft" ? "contrast(1.04) saturate(1.03)" : "none";
+
+  const markMoment = (markRating = rating || 5) => {
+    const seconds = videoRef.current?.currentTime || ytPlayer.current?.getCurrentTime?.() || 0;
+    onAddMoment?.({ seconds, rating: markRating });
+    onRate?.(markRating);
   };
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -440,7 +467,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
     if (embed.kind === "video") {
       return (
-        <div style={{ position: "relative" }}>
+        <div style={mediaShell(isFullscreen)}>
           <video
             ref={videoRef}
             src={mediaSrc}
@@ -449,7 +476,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
             onTimeUpdate={onTimeUpdate}
             onError={handleVideoError}
             onLoadedMetadata={onLoadedMetadata}
-            style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: isFullscreen ? 0 : 8, display: "block", background: "#000", filter: enhanceFilter }}
           />
           {relayReason && <RelayBadge text={relayReason} active={useRelay} />}
           {refreshing && <RefreshOverlay />}
@@ -459,7 +486,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
     if (embed.kind === "hls") {
       return (
-        <div style={{ position: "relative" }}>
+        <div style={mediaShell(isFullscreen)}>
           <video
             ref={videoRef}
             controls autoPlay playsInline
@@ -467,7 +494,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
             onTimeUpdate={onTimeUpdate}
             onError={handleVideoError}
             onLoadedMetadata={onLoadedMetadata}
-            style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: isFullscreen ? 0 : 8, display: "block", background: "#000", filter: enhanceFilter }}
           />
           {relayReason && <RelayBadge text={relayReason} active={useRelay} />}
           {refreshing && <RefreshOverlay />}
@@ -495,7 +522,27 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       }}
     >
       {/* Top controls */}
-      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 1001, display: "flex", gap: 8 }}>
+      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 1001, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "92vw" }}>
+        {(embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api") && (
+          <select value={enhanceMode} onChange={(e) => { e.stopPropagation(); setEnhanceMode(e.target.value); }} onClick={(e) => e.stopPropagation()} style={selectBtn} title="View enhancement">
+            <option value="off">Enhance Off</option>
+            <option value="soft">Soft</option>
+            <option value="crisp">Crisp</option>
+            <option value="cinema">Cinema</option>
+          </select>
+        )}
+        {qualityLevels.length > 0 && (
+          <select value={quality} onChange={(e) => { e.stopPropagation(); setQuality(e.target.value); }} onClick={(e) => e.stopPropagation()} style={selectBtn} title="HLS quality">
+            <option value="auto">Auto</option>
+            {qualityLevels.map((l) => <option key={l.idx} value={l.idx}>{l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}kbps`}</option>)}
+          </select>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.07)", borderRadius: 999, padding: "0 8px", height: 38, backdropFilter: "blur(12px)" }}>
+          {[1,2,3,4,5].map((n) => <button key={n} onClick={(e) => { e.stopPropagation(); onRate?.(rating === n ? null : n); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 16, padding: 1 }}>★</button>)}
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); markMoment(); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Mark this timestamp">
+          Mark
+        </button>
         {(embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && !useRelay && (
           <button onClick={(e) => { e.stopPropagation(); setRelayReason("Using the secure relay path."); setUseRelay(true); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Use secure relay">
             Relay
@@ -546,12 +593,24 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         </button>
       )}
 
-      <div ref={stageRef} onClick={(e) => e.stopPropagation()}>{renderStage()}</div>
+      <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
     </div>
   );
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
+
+const fullscreenStage = { width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#000" };
+
+const mediaShell = (fullscreen) => ({
+  position: "relative",
+  width: fullscreen ? "100vw" : "min(94vw, 1280px)",
+  height: fullscreen ? "100vh" : "min(86vh, calc(94vw * 9 / 16))",
+  maxHeight: fullscreen ? "100vh" : "86vh",
+  background: "#000",
+  borderRadius: fullscreen ? 0 : 8,
+  overflow: "hidden",
+});
 
 const stageWide = {
   width: "min(94vw, 1280px)",
@@ -585,6 +644,17 @@ const frameInner = {
   border: "none",
   display: "block",
   background: "#000",
+};
+
+const selectBtn = {
+  height: 38,
+  background: "rgba(255,255,255,0.07)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  color: "#f5f5f7",
+  borderRadius: 18,
+  padding: "0 10px",
+  fontSize: 11,
+  backdropFilter: "blur(12px)",
 };
 
 const ctrlBtn = {

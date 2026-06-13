@@ -1,8 +1,30 @@
 -- ═══════════════════════════════════════════════════════════
--- VIDEO VAULT SCHEMA — run this once in Supabase SQL Editor
+-- VIDEO VAULT v12 SCHEMA — Supabase is the real vault
+-- Run this in Supabase SQL Editor.
+-- Google Sheet is now a one-page mirror named "Vault Library", not source of truth.
 -- ═══════════════════════════════════════════════════════════
 
--- Per-user per-item state: favorite, watch progress, folder
+create extension if not exists pgcrypto;
+
+-- App-native library items: every URL/file/link added inside the app lives here.
+create table if not exists vault_items (
+  id          uuid default gen_random_uuid() primary key,
+  user_id     uuid references auth.users on delete cascade not null,
+  item_key    text not null,
+  url         text not null,
+  title       text,
+  note        text,
+  tags        text[] default '{}',
+  source      text,
+  type        text default 'link',
+  folder      text,
+  thumbnail   text,
+  created_at  timestamptz default now(),
+  updated_at  timestamptz default now(),
+  unique(user_id, item_key)
+);
+
+-- Per-user per-item state: favorite, watch progress, rating, current folder override.
 create table if not exists user_data (
   id          uuid default gen_random_uuid() primary key,
   user_id     uuid references auth.users on delete cascade not null,
@@ -11,11 +33,13 @@ create table if not exists user_data (
   progress    real default 0,
   duration    real default 0,
   folder      text,
+  rating      int check (rating is null or rating between 1 and 5),
+  rated_at    timestamptz,
   updated_at  timestamptz default now(),
   unique(user_id, item_key)
 );
 
--- Custom vault folders (separate from sheet tabs)
+-- Native app folders. These replace the old Google Sheet tab workflow.
 create table if not exists vault_folders (
   id          uuid default gen_random_uuid() primary key,
   user_id     uuid references auth.users on delete cascade not null,
@@ -24,7 +48,18 @@ create table if not exists vault_folders (
   unique(user_id, name)
 );
 
--- Per-user settings: sheet connection + view prefs
+-- Timestamp marks for moments you rate or want to revisit.
+create table if not exists vault_moment_marks (
+  id          uuid default gen_random_uuid() primary key,
+  user_id     uuid references auth.users on delete cascade not null,
+  item_key    text not null,
+  seconds     real default 0,
+  rating      int check (rating is null or rating between 1 and 5),
+  note        text,
+  created_at  timestamptz default now()
+);
+
+-- Per-user settings: sheet webhook/mirror config + view prefs.
 create table if not exists user_settings (
   user_id     uuid references auth.users on delete cascade primary key,
   sheet_id    text,
@@ -33,8 +68,7 @@ create table if not exists user_settings (
   updated_at  timestamptz default now()
 );
 
--- Quick Adds: items added directly in the app (not from Google Sheets)
--- Synced per-user so they survive across devices and browser clears
+-- Legacy table kept so older installs don't break. v12 uses vault_items.
 create table if not exists vault_quick_adds (
   id          uuid default gen_random_uuid() primary key,
   user_id     uuid references auth.users on delete cascade not null,
@@ -44,18 +78,36 @@ create table if not exists vault_quick_adds (
   unique(user_id, item_key)
 );
 
--- Row level security
-alter table user_data        enable row level security;
-alter table vault_folders    enable row level security;
-alter table user_settings    enable row level security;
-alter table vault_quick_adds enable row level security;
+alter table vault_items        enable row level security;
+alter table user_data          enable row level security;
+alter table vault_folders      enable row level security;
+alter table vault_moment_marks enable row level security;
+alter table user_settings      enable row level security;
+alter table vault_quick_adds   enable row level security;
 
-create policy "own user_data"     on user_data        for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "own vault_folders" on vault_folders    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "own user_settings" on user_settings    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "own quick_adds"    on vault_quick_adds for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+do $$ begin
+  create policy "own vault_items" on vault_items for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "own user_data" on user_data for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "own vault_folders" on vault_folders for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "own moment_marks" on vault_moment_marks for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "own user_settings" on user_settings for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "own quick_adds" on vault_quick_adds for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
 
--- Indexes
-create index if not exists idx_user_data_user        on user_data(user_id);
-create index if not exists idx_user_data_key         on user_data(user_id, item_key);
-create index if not exists idx_vault_quick_adds_user on vault_quick_adds(user_id);
+create index if not exists idx_vault_items_user        on vault_items(user_id);
+create index if not exists idx_vault_items_key         on vault_items(user_id, item_key);
+create index if not exists idx_vault_items_folder      on vault_items(user_id, folder);
+create index if not exists idx_user_data_user          on user_data(user_id);
+create index if not exists idx_user_data_key           on user_data(user_id, item_key);
+create index if not exists idx_moment_marks_user_key   on vault_moment_marks(user_id, item_key);
+create index if not exists idx_vault_quick_adds_user   on vault_quick_adds(user_id);

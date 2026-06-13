@@ -1,3 +1,25 @@
+# Video Vault v12
+
+Supabase is the live vault. Google Sheets is now a one-page mirror/reference named `Vault Library`.
+
+## v12 setup
+
+1. Run `sql/schema.sql` in Supabase.
+2. Deploy the Apps Script in `scripts/vault-automation.gs` if you want the Sheet mirror.
+3. Set `SHEETS_WEBHOOK_URL` in Vercel to the Apps Script Web App URL.
+4. Run locally with `npm install && npm run dev`.
+
+## v12 behavior
+
+- Add links inside the app.
+- Fill in title, tags, notes, and folder.
+- Supabase stores the item instantly.
+- The Google Sheet mirror updates in the background.
+- Folders are native app tabs now.
+- The player uses direct playback first, then secure relay fallback when needed.
+
+---
+
 # Video Vault v11
 
 Personal media vault for videos and images, with safe embeds first, direct playback second, and a secured relay fallback for streams the browser blocks because of CORS.

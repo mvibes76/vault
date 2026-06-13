@@ -5,11 +5,12 @@ import { itemKey } from "@/lib/utils";
 import { getSourceMeta } from "@/lib/sources";
 import { T } from "@/lib/theme";
 
-export default function QuickAddModal({ onAdd, onClose }) {
+export default function QuickAddModal({ onAdd, onClose, folders = [] }) {
   const [url, setUrl]     = useState("");
   const [title, setTitle] = useState("");
   const [note, setNote]   = useState("");
   const [tags, setTags]   = useState("");
+  const [folder, setFolder] = useState("");
   const [pasting, setPasting] = useState(false);
   const [preflight, setPreflight] = useState({ state: "idle", msg: "" }); // idle | checking | ok | fail
   const urlRef = useRef(null);
@@ -33,8 +34,7 @@ export default function QuickAddModal({ onAdd, onClose }) {
   const isKnown = meta && meta.id !== "extract";
   const isExtract = meta?.id === "extract";
 
-  // Pre-flight: for unknown sources, verify /api/extract finds a video.
-  // Known sources (YouTube, Vimeo, etc.) skip this — they're guaranteed playable.
+  // Pre-flight is informational only. v12 stores any safe URL, playable or not.
   useEffect(() => {
     if (!url.trim()) { setPreflight({ state: "idle", msg: "" }); return; }
     if (isKnown)    { setPreflight({ state: "ok", msg: "" }); return; }
@@ -59,7 +59,7 @@ export default function QuickAddModal({ onAdd, onClose }) {
     return () => { cancelled = true; clearTimeout(t); };
   }, [url, isKnown, isExtract]);
 
-  const canAdd = url.trim() && (isKnown || preflight.state === "ok");
+  const canAdd = /^https?:\/\//i.test(url.trim());
 
   const handlePaste = async () => {
     setPasting(true);
@@ -80,21 +80,12 @@ export default function QuickAddModal({ onAdd, onClose }) {
       note: note.trim(),
       tags: tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
       source: meta?.id,
-      tab: "Quick Adds",
-      isQuickAdd: true,
+      folder: folder || null,
+      tab: folder || "Vault Library",
+      isVaultItem: true,
       addedAt: new Date().toISOString(),
     };
     onAdd(item);
-    // Fire-and-forget sheet sync (optional Apps Script webhook)
-    fetch("/api/sheets-sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "quick_add",
-        url: item.url, title: item.title, note: item.note,
-        tags: item.tags.join(", "), type: item.source,
-      }),
-    }).catch(() => {});
     onClose();
   };
 
@@ -127,7 +118,7 @@ export default function QuickAddModal({ onAdd, onClose }) {
               ref={urlRef}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="Paste a video URL..."
+              placeholder="Paste any media or reference URL..."
               style={{ flex: 1, padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 14, outline: "none", fontFamily: "monospace" }}
             />
             <button onClick={handlePaste} disabled={pasting} style={{ padding: "11px 14px", background: "rgba(255,255,255,0.07)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text2, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
@@ -146,6 +137,15 @@ export default function QuickAddModal({ onAdd, onClose }) {
             placeholder="Tags (comma-separated)"
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
           />
+
+          <select
+            value={folder}
+            onChange={(e) => setFolder(e.target.value)}
+            style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
+          >
+            <option value="" style={{ background: "#111" }}>No folder</option>
+            {folders.map((f) => <option key={f.name} value={f.name} style={{ background: "#111" }}>{f.name}</option>)}
+          </select>
 
           <input
             value={note} onChange={(e) => setNote(e.target.value)}
@@ -175,8 +175,8 @@ export default function QuickAddModal({ onAdd, onClose }) {
                 </span>
               )}
               {isExtract && preflight.state === "fail" && (
-                <span style={{ color: "#ff6b6b", marginLeft: "auto", textAlign: "right", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {preflight.msg}
+                <span style={{ color: T.text4, marginLeft: "auto", textAlign: "right", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  Saved as reference
                 </span>
               )}
             </div>
@@ -196,7 +196,7 @@ export default function QuickAddModal({ onAdd, onClose }) {
               marginTop: 4,
             }}
           >
-            {isExtract && preflight.state === "checking" ? "Checking URL..." : "Add to Vault"}
+            Add to Vault
           </button>
         </div>
       </div>

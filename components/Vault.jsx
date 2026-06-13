@@ -14,7 +14,7 @@ import {
   supabase, isSupabaseConfigured, getUserData, toggleFavorite,
   setItemFolder, getFolders, createFolder, deleteFolder,
   getSettings, saveSettings, saveProgress,
-  getQuickAdds, addQuickAdd, removeQuickAdd,
+  getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark,
 } from "@/lib/supabase";
 
 const VIEW_MODES = [
@@ -64,7 +64,7 @@ export default function Vault() {
   const [userData, setUserData] = useState({});
   const [folders, setFolders]   = useState([]);
 
-  const [quickAdds, setQuickAdds] = useState([]);
+  const [quickAdds, setQuickAdds] = useState([]); // v12: app-native vault items, kept as quickAdds internally for compatibility
   const [quickAddsHydrated, setQuickAddsHydrated] = useState(false);
 
   const searchRef = useRef(null);
@@ -79,6 +79,27 @@ export default function Vault() {
     if (!quickAddsHydrated) return;
     try { localStorage.setItem("vv_quick_adds", JSON.stringify(quickAdds)); } catch {}
   }, [quickAdds, quickAddsHydrated]);
+
+  // Supabase realtime: keep open devices in sync when tables have realtime enabled.
+  useEffect(() => {
+    if (!user || !supabase) return;
+    const channel = supabase
+      .channel(`vault-live-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "vault_items", filter: `user_id=eq.${user.id}` }, async () => {
+        const items = await getVaultItems(user.id);
+        setQuickAdds(items);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "user_data", filter: `user_id=eq.${user.id}` }, async () => {
+        const data = await getUserData(user.id);
+        setUserData(data);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "vault_folders", filter: `user_id=eq.${user.id}` }, async () => {
+        const nextFolders = await getFolders(user.id);
+        setFolders(nextFolders);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
 
   // PWA install
   useEffect(() => {
@@ -126,7 +147,7 @@ export default function Vault() {
         setUser(u || null);
         if (u) {
           const [ud, fl, settings, remoteQA] = await Promise.all([
-            getUserData(u.id), getFolders(u.id), getSettings(u.id), getQuickAdds(u.id),
+            getUserData(u.id), getFolders(u.id), getSettings(u.id), getVaultItems(u.id),
           ]);
           setUserData(ud); setFolders(fl);
           if (remoteQA.length > 0) {
@@ -135,8 +156,8 @@ export default function Vault() {
           }
           if (settings?.view_mode) setViewMode(settings.view_mode);
           if (settings?.sheet_id) {
+            // v12: Sheets is a mirror, not a source. Keep the id for legacy settings, but do not load tabs.
             setSheetId(settings.sheet_id); setManualTabs(settings.manual_tabs || null);
-            loadSheet(settings.sheet_id, settings.manual_tabs || null, true); return;
           }
         }
       }
@@ -144,10 +165,10 @@ export default function Vault() {
         const saved = localStorage.getItem("vv_sheet_id");
         const savedTabs = localStorage.getItem("vv_manual_tabs");
         if (saved) {
+          // v12 keeps legacy sheet id only for reference. App data loads from Supabase/local vault items.
           setSheetId(saved);
           const mt = savedTabs ? JSON.parse(savedTabs) : null;
           setManualTabs(mt);
-          loadSheet(saved, mt, true);
         }
       } catch {}
     };
@@ -166,14 +187,10 @@ export default function Vault() {
     } catch {}
     if (user) saveSettings(user.id, { sheet_id: id, manual_tabs: mt });
     setShowConfig(false); setNeedsManualTabs(false);
-    loadSheet(id, mt, true);
   };
 
   // ── Aggregated items ──────────────────────────────────────────────────────
-  const allItems = useMemo(() => {
-    const sheetItems = tabs.flatMap((t) => t.items);
-    return [...sheetItems, ...quickAdds];
-  }, [tabs, quickAdds]);
+  const allItems = useMemo(() => quickAdds, [quickAdds]);
 
   // ── User actions ──────────────────────────────────────────────────────────
   const handleToggleFavorite = async (key, current) => {
@@ -181,8 +198,19 @@ export default function Vault() {
     if (user) await toggleFavorite(user.id, key, current);
   };
   const handleAssignFolder = async (key, folder) => {
-    setUserData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), item_key: key, folder } }));
-    if (user) await setItemFolder(user.id, key, folder);
+    const normalized = folder || null;
+    setUserData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), item_key: key, folder: normalized } }));
+    setQuickAdds((prev) => prev.map((i) => i.key === key ? { ...i, folder: normalized } : i));
+    if (user) {
+      await setItemFolder(user.id, key, normalized);
+      const item = quickAdds.find((i) => i.key === key);
+      if (item) await upsertVaultItem(user.id, { ...item, folder: normalized });
+      fetch("/api/sheets-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "upsert", ...(item || {}), folder: normalized }),
+      }).catch(() => {});
+    }
   };
   const handleCreateFolder = async (name) => {
     if (folders.some((f) => f.name === name)) return;
@@ -204,11 +232,35 @@ export default function Vault() {
 
   const handleQuickAdd = async (item) => {
     setQuickAdds((prev) => [item, ...prev.filter((i) => i.url !== item.url)]);
-    if (user) await addQuickAdd(user.id, item);
+    if (user) await upsertVaultItem(user.id, item);
+    fetch("/api/sheets-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upsert", ...item }),
+    }).catch(() => {});
   };
   const handleRemoveQuickAdd = async (key) => {
     setQuickAdds((prev) => prev.filter((i) => i.key !== key));
-    if (user) await removeQuickAdd(user.id, key);
+    if (user) await removeVaultItem(user.id, key);
+    fetch("/api/sheets-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", key }),
+    }).catch(() => {});
+  };
+
+
+  const handleSetRating = async (key, rating) => {
+    const nextRating = rating || null;
+    setUserData((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] || {}), item_key: key, rating: nextRating, rated_at: nextRating ? new Date().toISOString() : null, updated_at: new Date().toISOString() },
+    }));
+    if (user) await setItemRating(user.id, key, nextRating);
+  };
+
+  const handleAddMomentMark = async (key, mark) => {
+    if (user) await addMomentMark(user.id, key, mark);
   };
 
   const handleMarkWatched = async (key) => {
@@ -234,9 +286,9 @@ export default function Vault() {
     let items = allItems;
     if (activeView === "favorites") items = items.filter((i) => userData[i.key]?.favorite);
     else if (activeView === "continue") items = items.filter((i) => { const d = userData[i.key]; return d?.progress > 5 && d?.duration > 0 && d.progress / d.duration < 0.95; });
-    else if (activeView === "quick-adds") items = items.filter((i) => i.isQuickAdd || i.tab === "Quick Adds");
-    else if (activeView.startsWith("tab:")) items = items.filter((i) => i.tab === activeView.slice(4));
-    else if (activeView.startsWith("folder:")) items = items.filter((i) => userData[i.key]?.folder === activeView.slice(7));
+    else if (activeView === "rated") items = items.filter((i) => userData[i.key]?.rating);
+    else if (activeView.startsWith("tab:")) items = items.filter((i) => (userData[i.key]?.folder || i.folder) === activeView.slice(4));
+    else if (activeView.startsWith("folder:")) items = items.filter((i) => (userData[i.key]?.folder || i.folder) === activeView.slice(7));
 
     if (sourceFilter !== "all") items = items.filter((i) => (i.source || sourceIdOf(i.url)) === sourceFilter);
 
@@ -264,8 +316,9 @@ export default function Vault() {
     all:       allItems.length,
     favorites: allItems.filter((i) => userData[i.key]?.favorite).length,
     continue:  allItems.filter((i) => { const d = userData[i.key]; return d?.progress > 5 && d?.duration > 0 && d.progress / d.duration < 0.95; }).length,
+    rated:     allItems.filter((i) => userData[i.key]?.rating).length,
   };
-  folders.forEach((f) => { counts[`folder:${f.name}`] = allItems.filter((i) => userData[i.key]?.folder === f.name).length; });
+  folders.forEach((f) => { counts[`folder:${f.name}`] = allItems.filter((i) => (userData[i.key]?.folder || i.folder) === f.name).length; });
 
   // ── Source filter pills (only show sources actually present in current set) ─
   const sourcesPresent = useMemo(() => {
@@ -302,7 +355,7 @@ export default function Vault() {
     activeView === "all"            ? "Everything"     :
     activeView === "favorites"      ? "Favorites"      :
     activeView === "continue"       ? "Continue"       :
-    activeView === "quick-adds"     ? "Quick Adds"     :
+    activeView === "rated"          ? "Rated"          :
     activeView.startsWith("tab:")   ? activeView.slice(4) :
     activeView.startsWith("folder:")? activeView.slice(7) : "";
 
@@ -323,13 +376,14 @@ export default function Vault() {
     isMobile,
     onRemoveQuickAdd: handleRemoveQuickAdd,
     onMarkWatched: handleMarkWatched,
+    onSetRating: handleSetRating,
   };
 
   return (
     <div style={{ display: "flex", minHeight: "100dvh", background: T.bg, color: T.text1, fontFamily: "'Inter',-apple-system,BlinkMacSystemFont,sans-serif", overflowX: "hidden" }}>
 
       <Sidebar
-        tabs={[...tabs, ...(quickAdds.length > 0 ? [{ name: "Quick Adds", items: quickAdds }] : [])]}
+        tabs={[]}
         activeView={activeView} onNavigate={navigate}
         folders={folders} onCreateFolder={handleCreateFolder} onDeleteFolder={handleDeleteFolder}
         counts={counts}
@@ -348,7 +402,7 @@ export default function Vault() {
             syncing={syncing} searchOpen={showSearch}
             searchRef={searchRef} search={search} onSearchChange={setSearch}
             onSort={() => setShowSort(!showSort)} sortBy={sortBy}
-            onSync={sheetId ? () => loadSheet(sheetId, manualTabs) : null}
+            onSync={null}
             onQuickAdd={() => setShowQuickAdd(true)}
           />
         ) : (
@@ -356,7 +410,7 @@ export default function Vault() {
             viewTitle={viewTitle} viewItems={viewItems}
             search={search} onSearch={setSearch}
             viewMode={viewMode} onViewMode={handleViewModeChange}
-            onSync={sheetId ? () => loadSheet(sheetId, manualTabs) : null} syncing={syncing}
+            onSync={null} syncing={syncing}
             sortBy={sortBy} onSortChange={setSortBy}
             onQuickAdd={() => setShowQuickAdd(true)}
             installPrompt={installPrompt} onInstall={handleInstall}
@@ -369,11 +423,10 @@ export default function Vault() {
           </div>
         )}
 
-        {tabs.length > 0 && (
+        {folders.length > 0 && (
           <ScrollRow>
             <Pill active={activeView === "all"} onClick={() => navigate("all")}>All</Pill>
-            {tabs.map((t) => <Pill key={t.name} active={activeView === `tab:${t.name}`} onClick={() => navigate(`tab:${t.name}`)}>{t.name}</Pill>)}
-            {quickAdds.length > 0 && <Pill active={activeView === "quick-adds"} onClick={() => navigate("quick-adds")}>Quick Adds</Pill>}
+            {folders.map((f) => <Pill key={f.name} active={activeView === `folder:${f.name}`} onClick={() => navigate(`folder:${f.name}`)}>{f.name}</Pill>)}
           </ScrollRow>
         )}
 
@@ -394,11 +447,9 @@ export default function Vault() {
             <EmptyState
               icon="inbox"
               title="Empty vault"
-              sub="Connect a Google Sheet or paste a video URL to get started."
-              action={() => setShowConfig(true)}
-              actionLabel="Connect sheet"
-              secondaryAction={() => setShowQuickAdd(true)}
-              secondaryActionLabel="Add a video"
+              sub="Paste a video, image, Drive link, or reference URL to start your library."
+              action={() => setShowQuickAdd(true)}
+              actionLabel="Add to Vault"
             />
           )}
           {loading && <Spinner />}
@@ -430,7 +481,7 @@ export default function Vault() {
       {isMobile && <BottomNav activeTab={activeBottomTab} onTab={handleBottomTab} />}
 
       {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} />}
-      {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} />}
+      {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} />}
 
       {activeItem && (
         <Player
@@ -441,6 +492,9 @@ export default function Vault() {
           onClose={() => setActiveItem(null)}
           userId={user?.id}
           resumeAt={userData[activeItem.key]?.progress || 0}
+          rating={userData[activeItem.key]?.rating || 0}
+          onRate={(rating) => handleSetRating(activeItem.key, rating)}
+          onAddMoment={(mark) => handleAddMomentMark(activeItem.key, mark)}
         />
       )}
 
