@@ -72,6 +72,8 @@ When you paste a URL that isn't a known source, the player calls `/api/extract`.
 
 Highest resolution wins. Result is never cached (tokens expire). On failure you get a clear error and an "Open original" link.
 
+**Auto-refresh on expired tokens.** When a CDN-signed URL expires mid-playback, the `<video>` element fires an error. The player catches it, re-extracts a fresh URL from the page, swaps the source, and seeks back to where you left off. Up to 2 retries before giving up. HLS streams via hls.js fire the same path on fatal segment errors. There's also a manual refresh button (top-right circle-arrow) when watching an extracted stream.
+
 **What it won't fix:**
 - **IP-bound CDN tokens.** Server fetches from Vercel's IP, browser plays from yours. Some CDNs check, return 403. Architectural problem, not a parser problem.
 - **Cloudflare / Datadome / PerimeterX challenges.** These return interstitial HTML, not the real page. The fix is a headless browser worker (Playwright on Render/Railway), intentionally out of scope here.

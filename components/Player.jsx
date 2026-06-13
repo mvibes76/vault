@@ -54,6 +54,9 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [extracted, setExtracted] = useState(null); // { url, type, resolution } | null
   const [extractErr, setExtractErr] = useState("");
   const [extracting, setExtracting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshCount = useRef(0); // bail after too many auto-refresh attempts
+  const seekTarget = useRef(0);   // where to resume after a refresh
 
   // Set Twitch parent param from current hostname (required by Twitch embeds)
   useEffect(() => {
@@ -62,28 +65,78 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
   const baseEmbed = getEmbed(item.url, { muted, parent });
 
-  // When the source is the catch-all "extract", call /api/extract and
-  // synthesize a video/hls embed from whatever it returns.
+  // Callable extractor. cacheBust=true forces a fresh request so we can
+  // re-extract when the previous signed URL expires mid-playback.
+  const runExtract = useCallback(async ({ cacheBust = false } = {}) => {
+    setExtractErr("");
+    const u = `/api/extract?url=${encodeURIComponent(item.url)}${cacheBust ? `&t=${Date.now()}` : ""}`;
+    try {
+      const r = await fetch(u, { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok || !j.sources?.length) {
+        setExtractErr(j.error || "Could not find a video on that page.");
+        return null;
+      }
+      return j.sources[0]; // highest resolution, sorted server-side
+    } catch (e) {
+      setExtractErr(e.message || "Extraction failed.");
+      return null;
+    }
+  }, [item.url]);
+
+  // Initial extraction on open / item change
   useEffect(() => {
     if (baseEmbed?.kind !== "extract") return;
     let cancelled = false;
-    setExtracted(null); setExtractErr(""); setExtracting(true);
-    fetch(`/api/extract?url=${encodeURIComponent(item.url)}`)
-      .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
-      .then(({ ok, j }) => {
-        if (cancelled) return;
-        if (!ok || !j.sources?.length) {
-          setExtractErr(j.error || "Could not find a video on that page.");
-        } else {
-          // sources arrive sorted by resolution desc; pick highest
-          setExtracted(j.sources[0]);
-        }
-      })
-      .catch((e) => { if (!cancelled) setExtractErr(e.message || "Extraction failed."); })
-      .finally(() => { if (!cancelled) setExtracting(false); });
+    refreshCount.current = 0;
+    setExtracted(null); setExtracting(true);
+    runExtract().then((s) => {
+      if (cancelled) return;
+      if (s) setExtracted(s);
+      setExtracting(false);
+    });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.url, baseEmbed?.kind]);
+
+  // Refresh the stream: keep current playback position, re-extract, swap src.
+  const refreshStream = useCallback(async () => {
+    if (baseEmbed?.kind !== "extract") return;
+    if (refreshing) return;
+    seekTarget.current = videoRef.current?.currentTime || 0;
+    setRefreshing(true);
+    const next = await runExtract({ cacheBust: true });
+    if (next) {
+      // Force the <video> element to remount with the new src by clearing
+      // extracted first, then setting it. Without the clear, React skips
+      // the update if the URL host is the same and only the token differs.
+      setExtracted(null);
+      // Defer one tick so React commits the unmount
+      setTimeout(() => setExtracted(next), 0);
+      refreshCount.current += 1;
+    }
+    setRefreshing(false);
+  }, [baseEmbed?.kind, refreshing, runExtract]);
+
+  // After a refresh, when the new <video> mounts, seek back to where we left off.
+  // Triggered by onLoadedMetadata in the video element below.
+  const onLoadedMetadata = () => {
+    if (seekTarget.current > 2 && videoRef.current) {
+      videoRef.current.currentTime = seekTarget.current;
+      seekTarget.current = 0;
+    }
+  };
+
+  // <video> error handler. Most common cause: signed URL expired mid-playback.
+  // Auto-refresh up to 2 times before giving up.
+  const handleVideoError = () => {
+    if (baseEmbed?.kind !== "extract") return;
+    if (refreshCount.current >= 2) {
+      setExtractErr("Stream keeps expiring. Try opening the original.");
+      return;
+    }
+    refreshStream();
+  };
 
   // Effective embed: extraction result overrides "extract" placeholder
   const embed = (() => {
@@ -197,6 +250,11 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         hls.attachMedia(v);
         if (resumeAt > 2) v.currentTime = resumeAt;
         v.play().catch(() => {});
+        // Hand fatal errors (mostly expired-token segment 403s) to the
+        // same refresh path the <video> element uses for direct MP4s.
+        hls.on(Hls.Events.ERROR, (_evt, data) => {
+          if (data?.fatal && baseEmbed?.kind === "extract") handleVideoError();
+        });
       }
     })();
     return () => {
@@ -332,26 +390,36 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
     if (embed.kind === "video") {
       return (
-        <video
-          ref={videoRef}
-          src={embed.src}
-          controls autoPlay playsInline
-          muted={muted}
-          onTimeUpdate={onTimeUpdate}
-          style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
-        />
+        <div style={{ position: "relative" }}>
+          <video
+            ref={videoRef}
+            src={embed.src}
+            controls autoPlay playsInline
+            muted={muted}
+            onTimeUpdate={onTimeUpdate}
+            onError={handleVideoError}
+            onLoadedMetadata={onLoadedMetadata}
+            style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
+          />
+          {refreshing && <RefreshOverlay />}
+        </div>
       );
     }
 
     if (embed.kind === "hls") {
       return (
-        <video
-          ref={videoRef}
-          controls autoPlay playsInline
-          muted={muted}
-          onTimeUpdate={onTimeUpdate}
-          style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
-        />
+        <div style={{ position: "relative" }}>
+          <video
+            ref={videoRef}
+            controls autoPlay playsInline
+            muted={muted}
+            onTimeUpdate={onTimeUpdate}
+            onError={handleVideoError}
+            onLoadedMetadata={onLoadedMetadata}
+            style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
+          />
+          {refreshing && <RefreshOverlay />}
+        </div>
       );
     }
 
@@ -382,6 +450,11 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     >
       {/* Top controls */}
       <div style={{ position: "absolute", top: 16, right: 16, zIndex: 1001, display: "flex", gap: 8 }}>
+        {baseEmbed?.kind === "extract" && extracted && (
+          <button onClick={(e) => { e.stopPropagation(); refreshCount.current = 0; refreshStream(); }} style={ctrlBtn} title="Refresh stream (use if playback stops)">
+            <Icon name="sync" size={15} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
+          </button>
+        )}
         {canPip && (
           <button onClick={(e) => { e.stopPropagation(); togglePiP(); }} style={{ ...ctrlBtn, background: isPiP ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title="Picture in Picture">
             <Icon name="pip" size={15} />
@@ -469,3 +542,18 @@ const arrowBtn = {
   display: "flex", alignItems: "center", justifyContent: "center",
   zIndex: 1001, backdropFilter: "blur(16px)",
 };
+
+function RefreshOverlay() {
+  return (
+    <div style={{
+      position: "absolute", inset: 0,
+      background: "rgba(0,0,0,0.55)",
+      backdropFilter: "blur(4px)",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      borderRadius: 8, gap: 12, pointerEvents: "none",
+    }}>
+      <div style={{ width: 28, height: 28, border: "2px solid rgba(255,255,255,0.15)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      <div style={{ fontSize: 12, color: "#fff", fontWeight: 500, letterSpacing: 0.3 }}>Refreshing stream...</div>
+    </div>
+  );
+}
