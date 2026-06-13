@@ -5,7 +5,7 @@ import { T } from "@/lib/theme";
 import { getYouTubeId, getVimeoId, getGDriveId, getInstagramShortcode, proxiedMediaUrl } from "@/lib/utils";
 import { saveProgress } from "@/lib/supabase";
 
-// Singleton: load the YT IFrame API script once per page
+// ─── YouTube IFrame API singleton ─────────────────────────────────────────────
 let ytApiLoaded = false;
 let ytApiCallbacks = [];
 function loadYTApi(cb) {
@@ -20,34 +20,44 @@ function loadYTApi(cb) {
   }
 }
 
+// ─── Resolve the best playable video source ───────────────────────────────────
+// Priority: direct url for video type → scraped video → nothing
+// This runs BEFORE any render decision so video always wins over gallery/image.
+function resolveVideo(type, url, scraped) {
+  // Explicit video file
+  if (type === "video") return url;
+  // Any scraped video URL (covers reddit, facebook, twitter, generic og:video, etc.)
+  if (scraped?.video) return scraped.video;
+  return null;
+}
+
 export default function Embed({ item, items = [], currentIdx = 0, onNavigate, onClose, userId, resumeAt = 0, scraped }) {
   const { type, url } = item;
+
   const ytId  = type === "youtube" ? getYouTubeId(url) : null;
   const vimId = type === "vimeo"   ? getVimeoId(url)   : null;
   const gdId  = getGDriveId(url);
+
+  // Resolved video src — computed once, used to short-circuit all other render paths
+  const directVideo = resolveVideo(type, url, scraped);
 
   const videoRef   = useRef(null);
   const ytPlayer   = useRef(null);
   const ytDiv      = useRef(null);
   const lastSave   = useRef(0);
-  const touchStart = useRef(null);
+  const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
 
   const [muted,      setMuted]      = useState(false);
   const [audioMode,  setAudioMode]  = useState(false);
   const [isPiP,      setIsPiP]      = useState(false);
   const [galleryIdx, setGalleryIdx] = useState(0);
-
-  const touchStartY = useRef(null);
-  const touchStartX = useRef(null);
-
-  const directVideo =
-    type === "video"   ? url :
-    scraped?.video     ? scraped.video : null;
+  const [videoError, setVideoError] = useState(false);
 
   const hasNext = currentIdx < items.length - 1;
   const hasPrev = currentIdx > 0;
 
-  // Keyboard + scroll lock
+  // Keyboard nav + scroll lock
   useEffect(() => {
     const h = (e) => {
       if (e.key === "Escape") handleClose();
@@ -60,7 +70,7 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasNext, hasPrev, currentIdx]);
 
-  // Resume direct video
+  // Resume playback position
   useEffect(() => {
     if (videoRef.current && resumeAt > 2) videoRef.current.currentTime = resumeAt;
   }, [resumeAt]);
@@ -76,7 +86,12 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       ytDiv.current.id = playerId;
       ytPlayer.current = new window.YT.Player(playerId, {
         videoId: ytId,
-        playerVars: { autoplay: 1, mute: muted ? 1 : 0, start: resumeAt > 2 ? Math.floor(resumeAt) : 0, rel: 0 },
+        playerVars: {
+          autoplay: 1,
+          mute: muted ? 1 : 0,
+          start: resumeAt > 2 ? Math.floor(resumeAt) : 0,
+          rel: 0,
+        },
         events: { onReady: (e) => { ytPlayer.current = e.target; } },
       });
     });
@@ -118,25 +133,21 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
     else setMuted((m) => !m);
   };
 
-  // Swipe: horizontal = navigate, vertical = close
+  // Swipe: vertical = close, horizontal = navigate
   const onTouchStart = (e) => {
-    touchStart.current  = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
     touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
   };
   const onTouchEnd = (e) => {
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-    const dx = touchStartX.current - endX;
-    const dy = touchStartY.current - endY;
-    touchStart.current = touchStartX.current = touchStartY.current = null;
+    const dx = touchStartX.current - e.changedTouches[0].clientX;
+    const dy = touchStartY.current - e.changedTouches[0].clientY;
+    touchStartX.current = touchStartY.current = null;
     if (dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.5) { handleClose(); return; }
     if (Math.abs(dx) < 60) return;
     if (dx > 0 && hasNext) onNavigate?.(currentIdx + 1);
     if (dx < 0 && hasPrev) onNavigate?.(currentIdx - 1);
   };
 
-  // Picture-in-Picture
   const togglePiP = async () => {
     try {
       if (document.pictureInPictureElement) {
@@ -148,21 +159,24 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
   };
   const pipSupported = typeof document !== "undefined" && "pictureInPictureEnabled" in document;
 
+  // ─── Render decision tree ─────────────────────────────────────────────────
+  // ORDER MATTERS. Video always checked first. Gallery only fires when there
+  // is no video. Each branch is mutually exclusive.
   const renderContent = () => {
 
-    // ── YouTube ─────────────────────────────────────────────────────────────
+    // 1. YouTube
     if (type === "youtube" && ytId) {
       return (
-        <div style={isWide ? { width: "78vw", aspectRatio: "16/9" } : {}}>
-          <div ref={ytDiv} style={{ width: "100%", height: "100%", minHeight: 200 }} />
+        <div style={{ width: "min(96vw,900px)", aspectRatio: "16/9" }}>
+          <div ref={ytDiv} style={{ width: "100%", height: "100%" }} />
         </div>
       );
     }
 
-    // ── Vimeo ────────────────────────────────────────────────────────────────
+    // 2. Vimeo
     if (type === "vimeo" && vimId) {
       return (
-        <div style={{ width: "78vw", aspectRatio: "16/9" }}>
+        <div style={{ width: "min(96vw,900px)", aspectRatio: "16/9" }}>
           <iframe
             src={`https://player.vimeo.com/video/${vimId}?autoplay=1${muted ? "&muted=1" : ""}`}
             allow="autoplay; fullscreen"
@@ -172,7 +186,7 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       );
     }
 
-    // ── Google Drive ─────────────────────────────────────────────────────────
+    // 3. Google Drive (video, image, doc — anything in Drive)
     if (gdId && url.includes("drive.google.com")) {
       return (
         <div style={driveFrameWrap}>
@@ -186,8 +200,42 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       );
     }
 
-    // ── Instagram ────────────────────────────────────────────────────────────
-    // Server scraping is blocked — use Instagram's public embed endpoint instead.
+    // 4. Direct/scraped video — covers reddit, facebook, twitter, generic sites,
+    //    direct mp4 links. Checked BEFORE gallery so a reddit video post with
+    //    preview images still plays the video.
+    if (directVideo && !videoError) {
+      return (
+        <div style={{ position: "relative", width: "100%", display: "flex", justifyContent: "center" }}>
+          <video
+            ref={videoRef}
+            src={directVideo}
+            controls
+            autoPlay
+            playsInline
+            muted={muted}
+            onTimeUpdate={handleTimeUpdate}
+            onError={() => setVideoError(true)}
+            style={{
+              maxWidth: "96vw",
+              maxHeight: "88vh",
+              width: "100%",
+              borderRadius: 8,
+              display: audioMode ? "none" : "block",
+              background: "#000",
+            }}
+          />
+          {audioMode && (
+            <div style={{ padding: "32px 24px", textAlign: "center", background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", minWidth: 280 }}>
+              <Icon name="audioLines" size={48} style={{ color: "rgba(235,235,245,0.4)", marginBottom: 16 }} />
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 6 }}>{item.title}</div>
+              <div style={{ fontSize: 11, color: "#555" }}>Audio only mode</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 5. Instagram — native embed iframe (scraping is blocked by IG)
     if (type === "instagram") {
       const shortcode = getInstagramShortcode(url);
       const embedSrc  = shortcode
@@ -207,7 +255,7 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       }
     }
 
-    // ── TikTok ───────────────────────────────────────────────────────────────
+    // 6. TikTok — oEmbed iframe
     if (type === "tiktok" && scraped?.embed) {
       return (
         <div style={{ width: "min(90vw,380px)", height: "min(86vh,700px)", borderRadius: 12, overflow: "hidden", background: "#000" }}>
@@ -221,21 +269,30 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       );
     }
 
-    // ── Gallery ───────────────────────────────────────────────────────────────
-    // Triggered when type === "gallery" OR scrape returns 3+ images for any link/image
+    // 7. Image (direct)
+    if (type === "image") {
+      return (
+        <img
+          src={proxiedMediaUrl(url)} alt={item.title}
+          style={{ maxWidth: "92vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, display: "block" }}
+        />
+      );
+    }
+
+    // 8. Gallery — only fires when no video was found above.
+    //    Requires 3+ images in scraped.images.
     const galleryImages = scraped?.images?.length >= 3 ? scraped.images : null;
-    if (galleryImages && ["gallery","link","image"].includes(type)) {
+    if (galleryImages) {
       const gTotal   = galleryImages.length;
       const gCurrent = galleryImages[galleryIdx];
       return (
         <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxWidth: "94vw" }}>
-          {/* Main image */}
           <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "#111" }}>
             <img
               src={proxiedMediaUrl(gCurrent)}
               alt={`${item.title} ${galleryIdx + 1}`}
-              style={{ maxWidth: "90vw", maxHeight: "68vh", objectFit: "contain", display: "block" }}
-              onError={(e) => { e.currentTarget.style.opacity = "0.2"; }}
+              style={{ maxWidth: "92vw", maxHeight: "68vh", objectFit: "contain", display: "block" }}
+              onError={(e) => { e.currentTarget.style.opacity = "0.15"; }}
             />
             {galleryIdx > 0 && (
               <button onClick={() => setGalleryIdx(galleryIdx - 1)} style={galleryArrow("left")}>
@@ -251,19 +308,17 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
               {galleryIdx + 1} / {gTotal}
             </div>
           </div>
-          {/* Thumbnail strip */}
           <div style={{ display: "flex", gap: 6, overflowX: "auto", maxWidth: "90vw", paddingBottom: 4, scrollbarWidth: "none" }}>
             {galleryImages.slice(0, 20).map((img, i) => (
               <div key={i} onClick={() => setGalleryIdx(i)} style={{
                 width: 48, height: 48, flexShrink: 0, borderRadius: 6, overflow: "hidden", cursor: "pointer",
                 border: i === galleryIdx ? "2px solid #fff" : "2px solid transparent",
-                opacity: i === galleryIdx ? 1 : 0.45, transition: "opacity 0.15s, border-color 0.15s"
+                opacity: i === galleryIdx ? 1 : 0.45, transition: "opacity 0.15s, border-color 0.15s",
               }}>
                 <img src={proxiedMediaUrl(img)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
             ))}
           </div>
-          {/* Title + link */}
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 13, color: T.text3, marginBottom: 6 }}>{scraped?.title || item.title}</div>
             <a href={url} target="_blank" rel="noreferrer" style={{ color: T.text4, fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none" }}>
@@ -274,51 +329,15 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       );
     }
 
-    // ── Image ────────────────────────────────────────────────────────────────
-    if (type === "image") {
-      return (
-        <img
-          src={proxiedMediaUrl(url)} alt={item.title}
-          style={{ maxWidth: "90vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, display: "block" }}
-        />
-      );
-    }
-
-    // ── Direct video / audio ─────────────────────────────────────────────────
-    if (directVideo) {
-      return (
-        <div style={{ position: "relative" }}>
-          <video
-            ref={videoRef}
-            src={directVideo}
-            controls autoPlay playsInline
-            muted={muted}
-            onTimeUpdate={handleTimeUpdate}
-            style={{
-              maxWidth: "90vw", maxHeight: "86vh", borderRadius: 8, display: "block",
-              ...(audioMode ? { height: 0, maxHeight: 0 } : {})
-            }}
-          />
-          {audioMode && (
-            <div style={{ padding: "32px 24px", textAlign: "center", background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", minWidth: 280 }}>
-              <Icon name="audioLines" size={48} style={{ color: "rgba(235,235,245,0.4)", marginBottom: 16 }} />
-              <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 6 }}>{item.title}</div>
-              <div style={{ fontSize: 11, color: "#555" }}>Audio only mode</div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // ── Scraped image fallback ────────────────────────────────────────────────
+    // 9. Single scraped image
     if (scraped?.image) {
       return (
         <div style={{ textAlign: "center" }}>
           <img
             src={proxiedMediaUrl(scraped.image)} alt={item.title}
-            style={{ maxWidth: "80vw", maxHeight: "70vh", objectFit: "contain", borderRadius: 8 }}
+            style={{ maxWidth: "88vw", maxHeight: "72vh", objectFit: "contain", borderRadius: 8 }}
           />
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 14 }}>
             <a href={url} target="_blank" rel="noreferrer" style={{ color: T.text3, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}>
               Open original page <Icon name="external" size={13} />
             </a>
@@ -327,7 +346,7 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       );
     }
 
-    // ── External link card ───────────────────────────────────────────────────
+    // 10. Fallback — external link card
     return (
       <div style={{ textAlign: "center", padding: "32px 24px", maxWidth: 320 }}>
         <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
@@ -339,7 +358,7 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
           display: "inline-flex", alignItems: "center", gap: 6,
           padding: "9px 18px", background: "rgba(255,255,255,0.1)",
           border: "1px solid rgba(255,255,255,0.12)", borderRadius: 20,
-          color: "#f5f5f7", fontSize: 13, fontWeight: 500, textDecoration: "none"
+          color: "#f5f5f7", fontSize: 13, fontWeight: 500, textDecoration: "none",
         }}>
           Open <Icon name="external" size={12} />
         </a>
@@ -347,9 +366,8 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
     );
   };
 
-  const isWide = ["youtube","vimeo","gdrive"].includes(type);
-  const showMute = !!directVideo || type === "youtube" || type === "vimeo";
-  const canAudioMode = !!directVideo;
+  const showMute    = !!directVideo || type === "youtube" || type === "vimeo";
+  const canAudioMode = !!directVideo && !videoError;
 
   return (
     <div
@@ -358,9 +376,9 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
       onTouchEnd={onTouchEnd}
       style={{
         position: "fixed", inset: 0, zIndex: 999,
-        background: "rgba(0,0,0,0.95)",
+        background: "rgba(0,0,0,0.96)",
         display: "flex", alignItems: "center", justifyContent: "center",
-        backdropFilter: "blur(12px)"
+        backdropFilter: "blur(16px)",
       }}
     >
       {/* Top controls */}
@@ -383,7 +401,7 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
         <button onClick={handleClose} style={ctrlBtn}><Icon name="x" size={15} /></button>
       </div>
 
-      {/* Nav arrows */}
+      {/* Prev/next nav arrows */}
       {hasPrev && (
         <button onClick={(e) => { e.stopPropagation(); onNavigate?.(currentIdx - 1); }} style={{ ...arrowBtn, left: 12 }}>
           <Icon name="chevronLeft" size={22} />
@@ -395,12 +413,14 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
         </button>
       )}
 
-      <div onClick={(e) => e.stopPropagation()}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", display: "flex", justifyContent: "center" }}>
         {renderContent()}
       </div>
     </div>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const galleryArrow = (side) => ({
   position: "absolute", top: "50%", transform: "translateY(-50%)",
@@ -412,20 +432,20 @@ const galleryArrow = (side) => ({
 });
 
 const driveFrameWrap = {
-  width: "min(94vw,1100px)",
-  height: "min(86vh,720px)",
-  background: "#fff", borderRadius: 8, overflow: "hidden"
+  width: "min(96vw,1100px)",
+  height: "min(88vh,760px)",
+  background: "#fff", borderRadius: 8, overflow: "hidden",
 };
 
 const frameStyle = {
-  width: "100%", height: "100%", border: "none", borderRadius: 8, background: "#fff", display: "block"
+  width: "100%", height: "100%", border: "none", borderRadius: 8, background: "#fff", display: "block",
 };
 
 const ctrlBtn = {
   background: "rgba(255,255,255,0.07)", border: "none",
   color: "#f5f5f7", cursor: "pointer", borderRadius: "50%",
   width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center",
-  backdropFilter: "blur(12px)"
+  backdropFilter: "blur(12px)",
 };
 
 const arrowBtn = {
@@ -433,5 +453,5 @@ const arrowBtn = {
   background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
   color: "#f5f5f7", cursor: "pointer", borderRadius: "50%",
   width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center",
-  zIndex: 1001, backdropFilter: "blur(16px)"
+  zIndex: 1001, backdropFilter: "blur(16px)",
 };
