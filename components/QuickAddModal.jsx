@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import Icon from "./Icons";
 import { itemKey } from "@/lib/utils";
-import { getSourceMeta, isPlayable } from "@/lib/sources";
+import { getSourceMeta } from "@/lib/sources";
 import { T } from "@/lib/theme";
 
 export default function QuickAddModal({ onAdd, onClose }) {
@@ -11,6 +11,7 @@ export default function QuickAddModal({ onAdd, onClose }) {
   const [note, setNote]   = useState("");
   const [tags, setTags]   = useState("");
   const [pasting, setPasting] = useState(false);
+  const [preflight, setPreflight] = useState({ state: "idle", msg: "" }); // idle | checking | ok | fail
   const urlRef = useRef(null);
 
   // Read clipboard on mount
@@ -29,7 +30,36 @@ export default function QuickAddModal({ onAdd, onClose }) {
   }, [onClose]);
 
   const meta = url ? getSourceMeta(url) : null;
-  const playable = url ? isPlayable(url) : false;
+  const isKnown = meta && meta.id !== "extract";
+  const isExtract = meta?.id === "extract";
+
+  // Pre-flight: for unknown sources, verify /api/extract finds a video.
+  // Known sources (YouTube, Vimeo, etc.) skip this — they're guaranteed playable.
+  useEffect(() => {
+    if (!url.trim()) { setPreflight({ state: "idle", msg: "" }); return; }
+    if (isKnown)    { setPreflight({ state: "ok", msg: "" }); return; }
+    if (!isExtract) { setPreflight({ state: "fail", msg: "Not a valid URL" }); return; }
+
+    let cancelled = false;
+    setPreflight({ state: "checking", msg: "" });
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/extract?url=${encodeURIComponent(url.trim())}`);
+        const j = await r.json();
+        if (cancelled) return;
+        if (r.ok && j.sources?.length) {
+          setPreflight({ state: "ok", msg: `Found ${j.sources.length} stream${j.sources.length > 1 ? "s" : ""}` });
+        } else {
+          setPreflight({ state: "fail", msg: j.error || "No playable video found on that page" });
+        }
+      } catch (e) {
+        if (!cancelled) setPreflight({ state: "fail", msg: e.message || "Couldn't check this URL" });
+      }
+    }, 600); // debounce typing
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [url, isKnown, isExtract]);
+
+  const canAdd = url.trim() && (isKnown || preflight.state === "ok");
 
   const handlePaste = async () => {
     setPasting(true);
@@ -41,7 +71,7 @@ export default function QuickAddModal({ onAdd, onClose }) {
   };
 
   const handleAdd = async () => {
-    if (!url.trim() || !playable) return;
+    if (!canAdd) return;
     const item = {
       id: `qa-${Date.now()}`,
       key: itemKey(url.trim()),
@@ -123,30 +153,50 @@ export default function QuickAddModal({ onAdd, onClose }) {
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
           />
 
-          {/* Detected source */}
-          {url && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: playable ? T.text3 : "#ff6b6b" }}>
-              {playable
-                ? <>Detected as <span style={{ color: meta.color, fontWeight: 600 }}>{meta.name}</span></>
-                : <>That URL isn't playable inside the vault.</>}
+          {/* Detected source + pre-flight status */}
+          {url && meta && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: meta.color, flexShrink: 0 }} />
+              <span style={{ color: T.text2 }}>{meta.name}</span>
+              {isKnown && (
+                <span style={{ color: T.green, display: "inline-flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
+                  <Icon name="check" size={12} strokeWidth={2.5} /> Will play
+                </span>
+              )}
+              {isExtract && preflight.state === "checking" && (
+                <span style={{ color: T.text3, display: "inline-flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                  <span style={{ width: 11, height: 11, border: "1.5px solid rgba(255,255,255,0.15)", borderTopColor: T.text2, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                  Checking...
+                </span>
+              )}
+              {isExtract && preflight.state === "ok" && (
+                <span style={{ color: T.green, display: "inline-flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
+                  <Icon name="check" size={12} strokeWidth={2.5} /> {preflight.msg || "Playable"}
+                </span>
+              )}
+              {isExtract && preflight.state === "fail" && (
+                <span style={{ color: "#ff6b6b", marginLeft: "auto", textAlign: "right", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {preflight.msg}
+                </span>
+              )}
             </div>
           )}
 
           <button
             onClick={handleAdd}
-            disabled={!playable}
+            disabled={!canAdd}
             style={{
               padding: "13px",
-              background: playable ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
-              border: `1px solid ${playable ? "rgba(255,255,255,0.18)" : T.border}`,
+              background: canAdd ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
+              border: `1px solid ${canAdd ? "rgba(255,255,255,0.18)" : T.border}`,
               borderRadius: 12,
-              color: playable ? T.text1 : T.text4,
+              color: canAdd ? T.text1 : T.text4,
               fontSize: 15, fontWeight: 600,
-              cursor: playable ? "pointer" : "not-allowed",
+              cursor: canAdd ? "pointer" : "not-allowed",
               marginTop: 4,
             }}
           >
-            Add to Vault
+            {isExtract && preflight.state === "checking" ? "Checking URL..." : "Add to Vault"}
           </button>
         </div>
       </div>

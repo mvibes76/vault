@@ -64,15 +64,21 @@ export default function Vault() {
   const [userData, setUserData] = useState({});
   const [folders, setFolders]   = useState([]);
 
-  const [quickAdds, setQuickAdds] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("vv_quick_adds") || "[]"); } catch { return []; }
-  });
+  const [quickAdds, setQuickAdds] = useState([]);
+  const [quickAddsHydrated, setQuickAddsHydrated] = useState(false);
 
   const searchRef = useRef(null);
 
   useEffect(() => {
+    try { setQuickAdds(JSON.parse(localStorage.getItem("vv_quick_adds") || "[]")); }
+    catch { setQuickAdds([]); }
+    finally { setQuickAddsHydrated(true); }
+  }, []);
+
+  useEffect(() => {
+    if (!quickAddsHydrated) return;
     try { localStorage.setItem("vv_quick_adds", JSON.stringify(quickAdds)); } catch {}
-  }, [quickAdds]);
+  }, [quickAdds, quickAddsHydrated]);
 
   // PWA install
   useEffect(() => {

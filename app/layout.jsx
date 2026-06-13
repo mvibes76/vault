@@ -1,3 +1,5 @@
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+
 export const metadata = {
   title: "Vault",
   description: "Your personal media vault",
@@ -32,6 +34,7 @@ export default function RootLayout({ children }) {
         WebkitTapHighlightColor: "transparent", overscrollBehavior: "none"
       }}>
         {children}
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

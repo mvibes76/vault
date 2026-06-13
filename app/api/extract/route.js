@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { safeFetch, validatePublicUrl } from "@/lib/server/safe-url";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // Last-resort video extractor. Fetches a page server-side, looks for direct
 // video URLs in <video>/<source> tags, OpenGraph meta tags, Twitter player
@@ -21,15 +25,12 @@ export async function GET(request) {
   const target = new URL(request.url).searchParams.get("url");
   if (!target) return NextResponse.json({ error: "Missing url" }, { status: 400 });
 
-  let parsed;
-  try { parsed = new URL(target); }
-  catch { return NextResponse.json({ error: "Invalid url" }, { status: 400 }); }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    return NextResponse.json({ error: "Unsupported scheme" }, { status: 400 });
-  }
+  const checked = await validatePublicUrl(target);
+  if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
+  const parsed = checked.url;
 
   try {
-    const res = await fetch(parsed.href, {
+    const res = await safeFetch(parsed.href, {
       headers: {
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -141,7 +142,7 @@ function extractSources(html, base) {
 
   // Last-ditch: scan the page for inlined .mp4 / .m3u8 / .webm URLs in JS strings.
   // Tight bounds to keep this from matching documentation links etc.
-  for (const m of html.matchAll(/["'](https?:\/\/[^"'\s<>]+\.(?:mp4|m3u8|webm)(?:\?[^"'\s<>]*)?)["']/gi)) {
+  for (const m of html.matchAll(/["'](https?:\/\/[^"'\s<>]+\.(?:mp4|m3u8|webm|m4v|mov|ogg|ogv)(?:\?[^"'\s<>]*)?)["']/gi)) {
     add(m[1], null, null);
   }
 
@@ -149,8 +150,8 @@ function extractSources(html, base) {
 }
 
 function isLikelyVideo(url, type) {
-  if (type && /^(?:video|application\/(?:x-mpegurl|vnd\.apple\.mpegurl|dash\+xml))/i.test(type)) return true;
-  return /\.(mp4|webm|m3u8|mov|m4v|ogg|ogv|mpd)(\?|$)/i.test(url);
+  if (type && /^(?:video|application\/(?:x-mpegurl|vnd\.apple\.mpegurl))/i.test(type)) return true;
+  return /\.(mp4|webm|m3u8|mov|m4v|ogg|ogv)(\?|$)/i.test(url);
 }
 
 function absolutize(u, base) {

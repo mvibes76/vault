@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { getEmbed } from "@/lib/sources";
+import { proxiedStreamUrl } from "@/lib/utils";
 import { saveProgress } from "@/lib/supabase";
 
 // ─── YouTube IFrame API loader (one-time, page-wide) ─────────────────────────
@@ -49,6 +50,8 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [muted, setMuted]   = useState(false);
   const [isPiP, setIsPiP]   = useState(false);
   const [parent, setParent] = useState("localhost");
+  const [useRelay, setUseRelay] = useState(false);
+  const [relayReason, setRelayReason] = useState("");
 
   // Extraction state (used when source.id === "extract")
   const [extracted, setExtracted] = useState(null); // { url, type, resolution } | null
@@ -57,6 +60,12 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [refreshing, setRefreshing] = useState(false);
   const refreshCount = useRef(0); // bail after too many auto-refresh attempts
   const seekTarget = useRef(0);   // where to resume after a refresh
+
+  // Reset relay mode when changing items. Direct playback is always tried first.
+  useEffect(() => {
+    setUseRelay(false);
+    setRelayReason("");
+  }, [item.url]);
 
   // Set Twitch parent param from current hostname (required by Twitch embeds)
   useEffect(() => {
@@ -111,6 +120,8 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       // extracted first, then setting it. Without the clear, React skips
       // the update if the URL host is the same and only the token differs.
       setExtracted(null);
+      setUseRelay(false);
+      setRelayReason("");
       // Defer one tick so React commits the unmount
       setTimeout(() => setExtracted(next), 0);
       refreshCount.current += 1;
@@ -130,7 +141,18 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   // <video> error handler. Most common cause: signed URL expired mid-playback.
   // Auto-refresh up to 2 times before giving up.
   const handleVideoError = () => {
-    if (baseEmbed?.kind !== "extract") return;
+    // First failure path: the browser likely hit CORS on a direct file/HLS stream.
+    // Switch the same source through the secured server relay before giving up.
+    if ((embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && !useRelay) {
+      setRelayReason("Direct playback was blocked. Using the secure relay path.");
+      setUseRelay(true);
+      return;
+    }
+
+    if (baseEmbed?.kind !== "extract") {
+      setRelayReason("Playback failed. Open the original source or move this file to a CORS-friendly host.");
+      return;
+    }
     if (refreshCount.current >= 2) {
       setExtractErr("Stream keeps expiring. Try opening the original.");
       return;
@@ -149,6 +171,10 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       : { kind: "video", src: extracted.url, source: baseEmbed.source };
   })();
 
+  const mediaSrc = (embed?.kind === "video" || embed?.kind === "hls") && useRelay
+    ? proxiedStreamUrl(embed.src)
+    : embed?.src;
+
   const hasNext = currentIdx < items.length - 1;
   const hasPrev = currentIdx > 0;
 
@@ -157,8 +183,26 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const ytSlot   = useRef(null);
   const twSlot   = useRef(null);
   const hlsRef   = useRef(null);
+  const stageRef = useRef(null);
   const lastSave = useRef(0);
   const touch    = useRef({ x: null, y: null });
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Track native fullscreen state so the button reflects reality
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (stageRef.current?.requestFullscreen) await stageRef.current.requestFullscreen();
+    } catch {}
+  };
+  const canFullscreen = typeof document !== "undefined" && document.fullscreenEnabled;
 
   // ── Keyboard + scroll lock ──────────────────────────────────────────────
   const handleClose = useCallback(() => {
@@ -232,7 +276,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
     // Native HLS (Safari + iOS): just set src
     if (v.canPlayType("application/vnd.apple.mpegurl")) {
-      v.src = embed.src;
+      v.src = mediaSrc;
       if (resumeAt > 2) v.currentTime = resumeAt;
       v.play().catch(() => {});
       return;
@@ -246,14 +290,14 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       if (Hls.isSupported()) {
         const hls = new Hls();
         hlsRef.current = hls;
-        hls.loadSource(embed.src);
+        hls.loadSource(mediaSrc);
         hls.attachMedia(v);
         if (resumeAt > 2) v.currentTime = resumeAt;
         v.play().catch(() => {});
         // Hand fatal errors (mostly expired-token segment 403s) to the
         // same refresh path the <video> element uses for direct MP4s.
         hls.on(Hls.Events.ERROR, (_evt, data) => {
-          if (data?.fatal && baseEmbed?.kind === "extract") handleVideoError();
+          if (data?.fatal) handleVideoError();
         });
       }
     })();
@@ -263,7 +307,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       hlsRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [embed?.src]);
+  }, [mediaSrc]);
 
   // ── Direct video resume ─────────────────────────────────────────────────
   useEffect(() => {
@@ -271,7 +315,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       videoRef.current.currentTime = resumeAt;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [embed?.src]);
+  }, [mediaSrc]);
 
   // ── Periodic progress save for direct/HLS video ────────────────────────
   const onTimeUpdate = () => {
@@ -362,14 +406,20 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     }
 
     if (embed.kind === "iframe") {
-      const wrap = embed.portrait ? stagePortrait : stageWide;
+      const wrap =
+        embed.sizing === "portrait" ? stagePortrait :
+        embed.sizing === "tall"     ? stageTall :
+                                      stageWide;
+      // "tall" content (Reddit posts, Facebook embeds) often needs scroll
+      // inside the iframe to surface video controls hidden below the fold.
+      const allowScroll = embed.sizing === "tall";
       return (
         <div style={wrap}>
           <iframe
             src={embed.src}
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
             allowFullScreen
-            scrolling="no"
+            scrolling={allowScroll ? "yes" : "no"}
             style={frameInner}
           />
         </div>
@@ -393,7 +443,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <div style={{ position: "relative" }}>
           <video
             ref={videoRef}
-            src={embed.src}
+            src={mediaSrc}
             controls autoPlay playsInline
             muted={muted}
             onTimeUpdate={onTimeUpdate}
@@ -401,6 +451,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
             onLoadedMetadata={onLoadedMetadata}
             style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
           />
+          {relayReason && <RelayBadge text={relayReason} active={useRelay} />}
           {refreshing && <RefreshOverlay />}
         </div>
       );
@@ -418,19 +469,14 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
             onLoadedMetadata={onLoadedMetadata}
             style={{ maxWidth: "92vw", maxHeight: "86vh", borderRadius: 8, display: "block", background: "#000" }}
           />
+          {relayReason && <RelayBadge text={relayReason} active={useRelay} />}
           {refreshing && <RefreshOverlay />}
         </div>
       );
     }
 
     if (embed.kind === "image") {
-      return (
-        <img
-          src={embed.src}
-          alt={item.title || ""}
-          style={{ maxWidth: "92vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, display: "block" }}
-        />
-      );
+      return <ImageViewer src={embed.src} alt={item.title || ""} />;
     }
 
     return null;
@@ -450,6 +496,11 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     >
       {/* Top controls */}
       <div style={{ position: "absolute", top: 16, right: 16, zIndex: 1001, display: "flex", gap: 8 }}>
+        {(embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && !useRelay && (
+          <button onClick={(e) => { e.stopPropagation(); setRelayReason("Using the secure relay path."); setUseRelay(true); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Use secure relay">
+            Relay
+          </button>
+        )}
         {baseEmbed?.kind === "extract" && extracted && (
           <button onClick={(e) => { e.stopPropagation(); refreshCount.current = 0; refreshStream(); }} style={ctrlBtn} title="Refresh stream (use if playback stops)">
             <Icon name="sync" size={15} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
@@ -458,6 +509,11 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         {canPip && (
           <button onClick={(e) => { e.stopPropagation(); togglePiP(); }} style={{ ...ctrlBtn, background: isPiP ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title="Picture in Picture">
             <Icon name="pip" size={15} />
+          </button>
+        )}
+        {canFullscreen && (
+          <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} style={{ ...ctrlBtn, background: isFullscreen ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+            <Icon name="fullscreen" size={15} />
           </button>
         )}
         {canMute && (
@@ -490,7 +546,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         </button>
       )}
 
-      <div onClick={(e) => e.stopPropagation()}>{renderStage()}</div>
+      <div ref={stageRef} onClick={(e) => e.stopPropagation()}>{renderStage()}</div>
     </div>
   );
 }
@@ -498,7 +554,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const stageWide = {
-  width: "min(92vw, 1280px)",
+  width: "min(94vw, 1280px)",
   aspectRatio: "16 / 9",
   maxHeight: "86vh",
   background: "#000",
@@ -510,6 +566,15 @@ const stagePortrait = {
   width: "min(94vw, 420px)",
   height: "min(86vh, 760px)",
   background: "#000",
+  borderRadius: 10,
+  overflow: "hidden",
+};
+
+// Post-style content (Reddit, Facebook) — full height, narrower to feel mobile-native
+const stageTall = {
+  width: "min(94vw, 540px)",
+  height: "min(88vh, 820px)",
+  background: "#fff",
   borderRadius: 10,
   overflow: "hidden",
 };
@@ -543,6 +608,16 @@ const arrowBtn = {
   zIndex: 1001, backdropFilter: "blur(16px)",
 };
 
+function RelayBadge({ text, active }) {
+  return (
+    <div style={{ position: "absolute", left: 10, bottom: 10, right: 10, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+      <div style={{ padding: "6px 10px", borderRadius: 999, background: active ? "rgba(50,215,75,0.16)" : "rgba(255,255,255,0.10)", border: `1px solid ${active ? "rgba(50,215,75,0.24)" : T.border}`, color: active ? "rgba(205,255,214,0.92)" : T.text2, fontSize: 11, backdropFilter: "blur(12px)", maxWidth: "min(82vw, 520px)", textAlign: "center" }}>
+        {text}
+      </div>
+    </div>
+  );
+}
+
 function RefreshOverlay() {
   return (
     <div style={{
@@ -557,3 +632,146 @@ function RefreshOverlay() {
     </div>
   );
 }
+
+// ─── Image viewer with pinch/wheel zoom and drag pan ────────────────────────
+function ImageViewer({ src, alt }) {
+  const [scale, setScale] = useState(1);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const dragState  = useRef(null);
+  const pinchState = useRef(null);
+  const lastTap    = useRef(0);
+
+  const clamp = (s) => Math.max(1, Math.min(8, s));
+
+  const reset = () => { setScale(1); setPos({ x: 0, y: 0 }); };
+
+  // Mouse wheel zoom
+  const onWheel = (e) => {
+    e.preventDefault();
+    setScale((s) => {
+      const next = clamp(s + (-e.deltaY * 0.002) * s);
+      if (next === 1) setPos({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  // Touch: pinch zoom + one-finger pan + double-tap reset
+  const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      const [a, b] = e.touches;
+      pinchState.current = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), scale };
+      dragState.current = null;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTap.current < 280) { reset(); lastTap.current = 0; return; }
+      lastTap.current = now;
+      if (scale > 1) dragState.current = { x: e.touches[0].clientX - pos.x, y: e.touches[0].clientY - pos.y };
+    }
+  };
+  const onTouchMove = (e) => {
+    if (e.touches.length === 2 && pinchState.current) {
+      e.preventDefault();
+      const [a, b] = e.touches;
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      setScale(clamp((d / pinchState.current.d) * pinchState.current.scale));
+    } else if (e.touches.length === 1 && dragState.current) {
+      e.preventDefault();
+      setPos({
+        x: e.touches[0].clientX - dragState.current.x,
+        y: e.touches[0].clientY - dragState.current.y,
+      });
+    }
+  };
+  const onTouchEnd = () => { pinchState.current = null; dragState.current = null; };
+
+  // Mouse drag pan
+  const onMouseDown = (e) => {
+    e.preventDefault();
+    if (scale > 1) dragState.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+  };
+  const onMouseMove = (e) => {
+    if (dragState.current) setPos({ x: e.clientX - dragState.current.x, y: e.clientY - dragState.current.y });
+  };
+  const onMouseUp = () => { dragState.current = null; };
+  const onDoubleClick = () => { scale === 1 ? setScale(2.5) : reset(); };
+
+  const zoomBy = (factor) => {
+    setScale((s) => {
+      const next = clamp(s * factor);
+      if (next === 1) setPos({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+        onDoubleClick={onDoubleClick}
+        style={{
+          maxWidth: "94vw", maxHeight: "90vh",
+          overflow: "hidden",
+          cursor: scale > 1 ? (dragState.current ? "grabbing" : "grab") : "zoom-in",
+          userSelect: "none",
+          touchAction: "none",
+          borderRadius: 8,
+        }}
+      >
+        <img
+          src={src}
+          alt={alt}
+          draggable={false}
+          style={{
+            maxWidth: "94vw", maxHeight: "90vh",
+            objectFit: "contain", display: "block",
+            transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+            transformOrigin: "center",
+            transition: (dragState.current || pinchState.current) ? "none" : "transform 0.12s ease-out",
+            pointerEvents: "none",
+          }}
+        />
+      </div>
+
+      {/* Zoom controls (visible only when not at default scale, or on desktop hover) */}
+      <div style={{
+        position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)",
+        display: "flex", gap: 6,
+        background: "rgba(0,0,0,0.55)", borderRadius: 999, padding: 4,
+        border: "1px solid rgba(255,255,255,0.08)",
+        backdropFilter: "blur(10px)",
+      }}>
+        <button onClick={(e) => { e.stopPropagation(); zoomBy(1/1.5); }} style={zoomBtn} title="Zoom out">
+          <Icon name="zoomOut" size={14} />
+        </button>
+        <div style={{ fontSize: 11, color: "#fff", padding: "0 8px", alignSelf: "center", fontVariantNumeric: "tabular-nums", minWidth: 36, textAlign: "center" }}>
+          {Math.round(scale * 100)}%
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); zoomBy(1.5); }} style={zoomBtn} title="Zoom in">
+          <Icon name="zoomIn" size={14} />
+        </button>
+        {scale !== 1 && (
+          <button onClick={(e) => { e.stopPropagation(); reset(); }} style={zoomBtn} title="Reset">
+            <Icon name="x" size={13} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const zoomBtn = {
+  background: "rgba(255,255,255,0.08)",
+  border: "none",
+  color: "#fff",
+  cursor: "pointer",
+  borderRadius: "50%",
+  width: 30, height: 30,
+  display: "flex", alignItems: "center", justifyContent: "center",
+};

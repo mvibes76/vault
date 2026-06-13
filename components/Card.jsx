@@ -98,9 +98,13 @@ export default function Card({
           position: "absolute", top: 8, left: 8,
           padding: "3px 8px", borderRadius: 999, fontSize: 9, fontWeight: 600, letterSpacing: 0.3,
           background: "rgba(0,0,0,0.6)", color: meta.color, backdropFilter: "blur(8px)",
-          border: `1px solid ${meta.color}33`,
+          border: meta.id === "extract" ? `1px dashed ${meta.color}66` : `1px solid ${meta.color}33`,
           textTransform: "uppercase",
-        }}>{meta.name}</div>
+          display: "inline-flex", alignItems: "center", gap: 4,
+        }}>
+          {meta.name}
+          {meta.id === "extract" && <span style={{ opacity: 0.7 }}>·?</span>}
+        </div>
 
         {/* Favorite */}
         {fav && (

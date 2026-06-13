@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { safeFetch, validatePublicUrl } from "@/lib/server/safe-url";
 
-const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 // External media proxy for thumbnails and scraped images only.
@@ -13,19 +15,15 @@ export async function GET(request) {
 
   if (!rawUrl) return NextResponse.json({ error: "Missing url" }, { status: 400 });
 
-  let target;
-  try { target = new URL(rawUrl); }
-  catch { return NextResponse.json({ error: "Invalid url" }, { status: 400 }); }
-
-  if (!ALLOWED_PROTOCOLS.has(target.protocol)) {
-    return NextResponse.json({ error: "Unsupported protocol" }, { status: 400 });
-  }
+  const checked = await validatePublicUrl(rawUrl);
+  if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
+  const target = checked.url;
 
   try {
-    const res = await fetch(target.href, {
+    const res = await safeFetch(target.href, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
       },
       redirect: "follow",
       signal: AbortSignal.timeout(10000),
@@ -35,7 +33,11 @@ export async function GET(request) {
 
     const contentType = res.headers.get("content-type") || "application/octet-stream";
 
-    // Hard reject anything that isn't an image — no video, no audio, no binary blobs.
+    // Hard reject anything that is not a safe raster image — no video, no audio, no SVG, no binary blobs.
+    if (contentType.includes("svg")) {
+      return NextResponse.json({ error: "SVG proxying is not supported." }, { status: 415 });
+    }
+
     if (!contentType.startsWith("image/")) {
       return NextResponse.json(
         { error: "Only image proxying is supported." },

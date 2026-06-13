@@ -8,7 +8,6 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "vumbnail.com" },
       { protocol: "https", hostname: "www.dailymotion.com" },
       { protocol: "https", hostname: "cdn-cf-east.streamable.com" },
-      { protocol: "https", hostname: "**" },
     ],
   },
 };
