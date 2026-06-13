@@ -143,7 +143,9 @@ export async function GET(request) {
     }
 
     const allImages = [...new Set([...ogImages, ...pageImages])];
-    if (allImages.length >= 3) result.images = allImages.slice(0, 40);
+    // Only populate images when there is no video — prevents gallery from
+    // hijacking video posts that also have preview images.
+    if (allImages.length >= 3 && !result.video) result.images = allImages.slice(0, 40);
 
     // Resolve relative URLs
     const base = new URL(url);

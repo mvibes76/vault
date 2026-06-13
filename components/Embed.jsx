@@ -280,8 +280,8 @@ export default function Embed({ item, items = [], currentIdx = 0, onNavigate, on
     }
 
     // 8. Gallery — only fires when no video was found above.
-    //    Requires 3+ images in scraped.images.
-    const galleryImages = scraped?.images?.length >= 3 ? scraped.images : null;
+    //    Requires 3+ images in scraped.images AND no video in scraped.
+    const galleryImages = (scraped?.images?.length >= 3 && !scraped?.video) ? scraped.images : null;
     if (galleryImages) {
       const gTotal   = galleryImages.length;
       const gCurrent = galleryImages[galleryIdx];
