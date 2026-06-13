@@ -1,17 +1,15 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Icon from "./Icons";
-import { detectType, typeLabel, itemKey } from "@/lib/utils";
+import { itemKey } from "@/lib/utils";
+import { getSourceMeta, isPlayable } from "@/lib/sources";
 import { T } from "@/lib/theme";
 
-const SUPPORTED_TYPES = ["youtube","vimeo","video","audio","music","image","gallery","instagram","tiktok","link"];
-
 export default function QuickAddModal({ onAdd, onClose }) {
-  const [url,   setUrl]   = useState("");
+  const [url, setUrl]     = useState("");
   const [title, setTitle] = useState("");
-  const [type,  setType]  = useState("");
-  const [note,  setNote]  = useState("");
-  const [tags,  setTags]  = useState("");
+  const [note, setNote]   = useState("");
+  const [tags, setTags]   = useState("");
   const [pasting, setPasting] = useState(false);
   const urlRef = useRef(null);
 
@@ -20,11 +18,7 @@ export default function QuickAddModal({ onAdd, onClose }) {
     const read = async () => {
       try {
         const text = await navigator.clipboard.readText();
-        if (text?.startsWith("http")) {
-          setUrl(text.trim());
-          const detected = detectType(text.trim());
-          setType(detected);
-        }
+        if (text?.startsWith("http")) setUrl(text.trim());
       } catch {}
       urlRef.current?.focus();
     };
@@ -34,26 +28,20 @@ export default function QuickAddModal({ onAdd, onClose }) {
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
 
-  // Re-detect type when URL changes
-  useEffect(() => {
-    if (url) setType(detectType(url));
-  }, [url]);
+  const meta = url ? getSourceMeta(url) : null;
+  const playable = url ? isPlayable(url) : false;
 
   const handlePaste = async () => {
     setPasting(true);
     try {
       const text = await navigator.clipboard.readText();
-      if (text?.trim()) {
-        setUrl(text.trim());
-        setType(detectType(text.trim()));
-      }
+      if (text?.trim()) setUrl(text.trim());
     } catch {}
     setPasting(false);
   };
 
   const handleAdd = async () => {
-    if (!url.trim()) return;
-    const finalType = SUPPORTED_TYPES.includes(type) ? type : detectType(url) || "link";
+    if (!url.trim() || !playable) return;
     const item = {
       id: `qa-${Date.now()}`,
       key: itemKey(url.trim()),
@@ -61,26 +49,22 @@ export default function QuickAddModal({ onAdd, onClose }) {
       title: title.trim() || url.trim(),
       note: note.trim(),
       tags: tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
-      type: finalType,
+      source: meta?.id,
       tab: "Quick Adds",
       isQuickAdd: true,
       addedAt: new Date().toISOString(),
     };
     onAdd(item);
-    // Fire-and-forget — sync to Google Sheet if webhook is configured
-    // This routes the item to the "Quick Adds" tab in your linked sheet
+    // Fire-and-forget sheet sync (optional Apps Script webhook)
     fetch("/api/sheets-sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "quick_add",
-        url: item.url,
-        title: item.title,
-        note: item.note,
-        tags: item.tags.join(", "),
-        type: item.type,
+        url: item.url, title: item.title, note: item.note,
+        tags: item.tags.join(", "), type: item.source,
       }),
-    }).catch(() => {}); // never block on this
+    }).catch(() => {});
     onClose();
   };
 
@@ -93,9 +77,9 @@ export default function QuickAddModal({ onAdd, onClose }) {
         borderTopLeftRadius: 20, borderTopRightRadius: 20,
         border: `1px solid ${T.border}`,
         paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)",
-        fontFamily: "Inter, sans-serif"
+        fontFamily: "Inter, sans-serif",
+        maxWidth: 540, margin: "0 auto",
       }}>
-        {/* Handle */}
         <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 6px" }}>
           <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} />
         </div>
@@ -107,73 +91,59 @@ export default function QuickAddModal({ onAdd, onClose }) {
           </button>
         </div>
 
-        <div style={{ padding: "0 20px", display: "flex", flexDirection: "column", gap: 10 }}>
-          {/* URL row */}
+        <div style={{ padding: "0 20px 4px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", gap: 8 }}>
             <input
               ref={urlRef}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="Paste a URL..."
+              placeholder="Paste a video URL..."
               style={{ flex: 1, padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 14, outline: "none", fontFamily: "monospace" }}
             />
-            <button onClick={handlePaste} disabled={pasting} style={{ padding: "11px 14px", background: "rgba(255,255,255,0.07)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text2, fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
+            <button onClick={handlePaste} disabled={pasting} style={{ padding: "11px 14px", background: "rgba(255,255,255,0.07)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text2, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
               Paste
             </button>
           </div>
 
-          {/* Title */}
           <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            value={title} onChange={(e) => setTitle(e.target.value)}
             placeholder="Title (optional)"
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 14, outline: "none" }}
           />
 
-          {/* Type + Tags row */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              style={{ flex: 1, padding: "11px 12px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: type ? T.text1 : T.text3, fontSize: 13, outline: "none", cursor: "pointer" }}
-            >
-              <option value="">Auto-detect type</option>
-              {SUPPORTED_TYPES.map((t) => <option key={t} value={t}>{typeLabel[t] || t}</option>)}
-            </select>
-            <input
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="Tags (comma-separated)"
-              style={{ flex: 1, padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
-            />
-          </div>
-
-          {/* Note */}
           <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
+            value={tags} onChange={(e) => setTags(e.target.value)}
+            placeholder="Tags (comma-separated)"
+            style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
+          />
+
+          <input
+            value={note} onChange={(e) => setNote(e.target.value)}
             placeholder="Note (optional)"
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
           />
 
-          {/* Detected type badge */}
-          {url && type && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.text3 }}>
-              <Icon name="audioLines" size={11} />
-              Detected as <span style={{ color: T.text2, fontWeight: 500 }}>{typeLabel[type] || type}</span>
+          {/* Detected source */}
+          {url && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: playable ? T.text3 : "#ff6b6b" }}>
+              {playable
+                ? <>Detected as <span style={{ color: meta.color, fontWeight: 600 }}>{meta.name}</span></>
+                : <>That URL isn't playable inside the vault.</>}
             </div>
           )}
 
-          {/* Add button */}
           <button
             onClick={handleAdd}
-            disabled={!url.trim()}
+            disabled={!playable}
             style={{
-              padding: "13px", background: url.trim() ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
-              border: `1px solid ${url.trim() ? "rgba(255,255,255,0.18)" : T.border}`,
-              borderRadius: 12, color: url.trim() ? T.text1 : T.text4,
-              fontSize: 15, fontWeight: 600, cursor: url.trim() ? "pointer" : "not-allowed",
-              marginTop: 4
+              padding: "13px",
+              background: playable ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
+              border: `1px solid ${playable ? "rgba(255,255,255,0.18)" : T.border}`,
+              borderRadius: 12,
+              color: playable ? T.text1 : T.text4,
+              fontSize: 15, fontWeight: 600,
+              cursor: playable ? "pointer" : "not-allowed",
+              marginTop: 4,
             }}
           >
             Add to Vault
