@@ -9,13 +9,14 @@ import QuickAddModal from "./QuickAddModal";
 import SheetImportModal from "./SheetImportModal";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
-import { fetchTabData, itemKey, sourceIdOf } from "@/lib/utils";
+import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule } from "@/lib/utils";
 import { SOURCE_OPTIONS } from "@/lib/sources";
 import {
   supabase, isSupabaseConfigured, getUserData, toggleFavorite,
-  setItemFolder, getFolders, createFolder, deleteFolder,
+  setItemFolder, getFolders, createFolder, deleteFolder, renameFolder,
   getSettings, saveSettings, saveProgress,
   getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark, recordItemView,
+  getCoverLibrary, upsertCover, deleteCover,
 } from "@/lib/supabase";
 
 const VIEW_MODES = [
@@ -54,6 +55,9 @@ export default function Vault() {
   const [showSort, setShowSort]         = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [coverRules, setCoverRules] = useState([]); // legacy text rules kept for old installs
+  const [coverLibrary, setCoverLibrary] = useState([]);
 
   const [activeItem, setActiveItem]       = useState(null);
   const [activeItemIdx, setActiveItemIdx] = useState(0);
@@ -98,6 +102,10 @@ export default function Vault() {
       .on("postgres_changes", { event: "*", schema: "public", table: "vault_folders", filter: `user_id=eq.${user.id}` }, async () => {
         const nextFolders = await getFolders(user.id);
         setFolders(nextFolders);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "vault_covers", filter: `user_id=eq.${user.id}` }, async () => {
+        const nextCovers = await getCoverLibrary(user.id);
+        setCoverLibrary(nextCovers);
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -148,15 +156,16 @@ export default function Vault() {
         const u = data.session?.user;
         setUser(u || null);
         if (u) {
-          const [ud, fl, settings, remoteQA] = await Promise.all([
-            getUserData(u.id), getFolders(u.id), getSettings(u.id), getVaultItems(u.id),
+          const [ud, fl, settings, remoteQA, covers] = await Promise.all([
+            getUserData(u.id), getFolders(u.id), getSettings(u.id), getVaultItems(u.id), getCoverLibrary(u.id),
           ]);
-          setUserData(ud); setFolders(fl);
+          setUserData(ud); setFolders(fl); setCoverLibrary(covers || []);
           if (remoteQA.length > 0) {
             setQuickAdds(remoteQA);
             try { localStorage.setItem("vv_quick_adds", JSON.stringify(remoteQA)); } catch {}
           }
           if (settings?.view_mode) setViewMode(settings.view_mode);
+          if (Array.isArray(settings?.cover_rules)) setCoverRules(settings.cover_rules);
           if (settings?.sheet_id) {
             // v12: Sheets is a mirror, not a source. Keep the id for legacy settings, but do not load tabs.
             setSheetId(settings.sheet_id); setManualTabs(settings.manual_tabs || null);
@@ -192,8 +201,6 @@ export default function Vault() {
   };
 
   // ── Aggregated items ──────────────────────────────────────────────────────
-  const allItems = useMemo(() => quickAdds, [quickAdds]);
-
   const canonicalFolderName = useCallback((name, folderList = folders) => {
     const trimmed = String(name || "").trim();
     if (!trimmed) return null;
@@ -202,6 +209,37 @@ export default function Vault() {
   }, [folders]);
 
   const folderEquals = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
+  const applyCoverRules = useCallback((item) => {
+    if (!item) return item;
+    // Manual per-item covers should always win. Metadata/Sheet/provider covers can be made uniform by the Cover Library.
+    if (item.thumbnail && item.thumbnail_source === "manual") return item;
+
+    const sortedCovers = [...(coverLibrary || [])]
+      .filter((c) => c?.enabled !== false && c?.thumbnail)
+      .sort((a, b) => Number(a.priority || 100) - Number(b.priority || 100));
+    const cover = sortedCovers.find((c) => matchesCoverRule(item, c));
+    if (cover?.thumbnail) {
+      return { ...item, thumbnail: cover.thumbnail, thumbnail_source: "cover_library", cover_label: cover.label };
+    }
+
+    // Legacy support for old text rules saved in user_settings.cover_rules.
+    if (!item.thumbnail && coverRules.length) {
+      const legacy = coverRules.find((r) => matchesCoverRule(item, { label: r.tag, keywords: [r.tag], thumbnail: r.thumbnail, match_type: "any", enabled: true }));
+      if (legacy?.thumbnail) return { ...item, thumbnail: legacy.thumbnail, thumbnail_source: "cover_rule" };
+    }
+    return item;
+  }, [coverLibrary, coverRules]);
+
+  const inferFolderForItem = useCallback((item) => {
+    if (item?.folder) return canonicalFolderName(item.folder);
+    const haystack = [item?.title, item?.note, item?.url, ...(Array.isArray(item?.tags) ? item.tags : [])]
+      .filter(Boolean).join(" ").toLowerCase();
+    const match = folders.find((f) => f?.name && haystack.includes(String(f.name).toLowerCase()));
+    return match?.name || null;
+  }, [folders, canonicalFolderName]);
+
+  const allItems = useMemo(() => quickAdds.map(applyCoverRules), [quickAdds, applyCoverRules]);
 
   // ── User actions ──────────────────────────────────────────────────────────
   const handleToggleFavorite = async (key, current) => {
@@ -252,13 +290,65 @@ export default function Vault() {
       }).catch(() => {});
     }
   };
+
+  const handleRenameFolder = async (oldName, newName) => {
+    const from = canonicalFolderName(oldName);
+    const clean = String(newName || "").trim();
+    if (!from || !clean) return;
+    const existing = folders.find((f) => folderEquals(f.name, clean));
+    const target = existing?.name || clean;
+    setFolders((prev) => {
+      const filtered = prev.filter((f) => !folderEquals(f.name, from));
+      return [...filtered, { name: target }].filter((f, idx, arr) => arr.findIndex((x) => folderEquals(x.name, f.name)) === idx).sort((a,b) => a.name.localeCompare(b.name));
+    });
+    setQuickAdds((prev) => prev.map((i) => folderEquals(i.folder, from) ? { ...i, folder: target } : i));
+    setUserData((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((k) => { if (folderEquals(next[k].folder, from)) next[k] = { ...next[k], folder: target }; });
+      return next;
+    });
+    if (activeView === `folder:${from}`) setActiveView(`folder:${target}`);
+    if (user) await renameFolder(user.id, from, target);
+    const affectedItems = quickAdds.filter((i) => folderEquals(i.folder, from)).map((i) => ({ ...i, folder: target }));
+    if (affectedItems.length) fetch("/api/sheets-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "bulk_upsert", items: affectedItems }) }).catch(() => {});
+  };
+
+  const handleSaveCoverRules = async (rules) => {
+    setCoverRules(rules);
+    if (user) await saveSettings(user.id, { cover_rules: rules });
+  };
+
+  const handleSaveCover = async (cover) => {
+    const local = {
+      ...cover,
+      id: cover.id || `local-${Date.now()}`,
+      keywords: Array.isArray(cover.keywords) ? cover.keywords : [],
+      enabled: cover.enabled !== false,
+      priority: Number.isFinite(Number(cover.priority)) ? Number(cover.priority) : 100,
+    };
+    setCoverLibrary((prev) => [local, ...prev.filter((c) => c.id !== local.id)].sort((a, b) => Number(a.priority || 100) - Number(b.priority || 100) || String(a.label || "").localeCompare(String(b.label || ""))));
+    if (user) {
+      const saved = await upsertCover(user.id, local);
+      if (saved) setCoverLibrary((prev) => [saved, ...prev.filter((c) => c.id !== local.id && c.id !== saved.id)].sort((a, b) => Number(a.priority || 100) - Number(b.priority || 100) || String(a.label || "").localeCompare(String(b.label || ""))));
+    }
+  };
+
+  const handleDeleteCover = async (coverId) => {
+    setCoverLibrary((prev) => prev.filter((c) => c.id !== coverId));
+    if (user && coverId && !String(coverId).startsWith("local-")) await deleteCover(user.id, coverId);
+  };
+
   const handleViewModeChange = (mode) => { setViewMode(mode); if (user) saveSettings(user.id, { view_mode: mode }); };
   const handleSignOut = async () => { if (supabase) await supabase.auth.signOut(); window.location.reload(); };
 
   const handleQuickAdd = async (item) => {
-    const normalizedItem = { ...item, folder: canonicalFolderName(item.folder) };
-    setQuickAdds((prev) => [normalizedItem, ...prev.filter((i) => i.url !== normalizedItem.url)]);
+    const normalizedItem = { ...item, folder: inferFolderForItem(item) };
+    setQuickAdds((prev) => [normalizedItem, ...prev.filter((i) => i.url !== normalizedItem.url && i.key !== normalizedItem.key && i.key !== normalizedItem.previousKey)]);
+    if (user && normalizedItem.previousKey && normalizedItem.previousKey !== normalizedItem.key) await removeVaultItem(user.id, normalizedItem.previousKey);
     if (user) await upsertVaultItem(user.id, normalizedItem);
+    if (normalizedItem.previousKey && normalizedItem.previousKey !== normalizedItem.key) {
+      fetch("/api/sheets-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", key: normalizedItem.previousKey }) }).catch(() => {});
+    }
     fetch("/api/sheets-sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -292,7 +382,7 @@ export default function Vault() {
     const newFolderByLower = new Map();
     const cleanItems = [...byKey.values()].map((item) => {
       const rawFolder = String(item.folder || "").trim();
-      if (!rawFolder) return { ...item, folder: null };
+      if (!rawFolder) return { ...item, folder: inferFolderForItem(item) };
       const lower = rawFolder.toLowerCase();
       const resolved = existingByLower.get(lower) || newFolderByLower.get(lower) || rawFolder;
       if (!existingByLower.has(lower)) newFolderByLower.set(lower, resolved);
@@ -492,6 +582,7 @@ export default function Vault() {
     onMarkWatched: handleMarkWatched,
     onSetRating: handleSetRating,
     onDragItem: () => {},
+    onEditItem: setEditingItem,
   };
 
   return (
@@ -500,7 +591,7 @@ export default function Vault() {
       <Sidebar
         tabs={[]}
         activeView={activeView} onNavigate={navigate}
-        folders={folders} onCreateFolder={handleCreateFolder} onDeleteFolder={handleDeleteFolder} onDropItemToFolder={handleAssignFolder}
+        folders={folders} onCreateFolder={handleCreateFolder} onDeleteFolder={handleDeleteFolder} onRenameFolder={handleRenameFolder} onDropItemToFolder={handleAssignFolder}
         counts={counts}
         onSignOut={isSupabaseConfigured() ? handleSignOut : null} userEmail={user?.email}
         collapsed={isMobile ? false : sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -613,8 +704,9 @@ export default function Vault() {
 
       {isMobile && <BottomNav activeTab={activeBottomTab} onTab={handleBottomTab} />}
 
-      {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} />}
+      {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} coverRules={coverRules} onSaveCoverRules={handleSaveCoverRules} coverLibrary={coverLibrary} onSaveCover={handleSaveCover} onDeleteCover={handleDeleteCover} />}
       {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} onCreateFolder={handleCreateFolder} />}
+      {editingItem && <QuickAddModal mode="edit" initialItem={editingItem} onAdd={(item) => { handleQuickAdd(item); setEditingItem(null); }} onClose={() => setEditingItem(null)} folders={folders} onCreateFolder={handleCreateFolder} />}
       {showImport && <SheetImportModal onClose={() => setShowImport(false)} onImport={handleSheetImport} existingCount={quickAdds.length} />}
 
       {activeItem && (
@@ -646,42 +738,39 @@ export default function Vault() {
 
 function Dashboard({ isMobile, allItems, folders, totalViews, continueItems, recentlyViewed, recentlyAdded, topRatedItems, userData, onOpen, onNavigate, onQuickAdd, onImport, cardProps }) {
   const cardMode = isMobile ? "grid" : "grid";
-  const statCards = [
-    { label: "Saved", value: allItems.length, accent: "rgba(255,255,255,0.20)" },
-    { label: "Folders", value: folders.length, accent: "rgba(125,180,255,0.50)" },
-    { label: "Views", value: totalViews, accent: "rgba(80,220,120,0.55)" },
-    { label: "Rated", value: topRatedItems.length, accent: "rgba(255,204,92,0.60)" },
-  ];
+  const primary = continueItems[0] || recentlyViewed[0] || recentlyAdded[0] || null;
+  const compactStats = `${allItems.length} saved · ${folders.length} folders · ${totalViews} views`;
   return (
-    <div style={{ display: "grid", gap: isMobile ? 16 : 22 }}>
+    <div style={{ display: "grid", gap: isMobile ? 16 : 20 }}>
       <div style={{
-        border: `1px solid ${T.border}`, borderRadius: 22, padding: isMobile ? 18 : 24,
-        background: "radial-gradient(circle at top left, rgba(255,255,255,0.12), transparent 34%), linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025))",
-        boxShadow: "0 24px 70px rgba(0,0,0,0.28)", overflow: "hidden",
+        border: `1px solid ${T.border}`, borderRadius: 22, padding: isMobile ? 16 : 22,
+        background: "linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0.025))",
+        boxShadow: "0 24px 70px rgba(0,0,0,0.22)", overflow: "hidden",
       }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: isMobile ? "flex-start" : "center", flexDirection: isMobile ? "column" : "row" }}>
-          <div>
-            <div style={{ fontSize: isMobile ? 24 : 32, lineHeight: 1.05, fontWeight: 800, letterSpacing: -1.2, color: T.text1 }}>Welcome back</div>
-            <div style={{ marginTop: 8, fontSize: 13, color: T.text4 }}>Continue watching, import from Sheets, or save the next reference.</div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ minWidth: 220 }}>
+            <div style={{ fontSize: isMobile ? 24 : 30, lineHeight: 1.05, fontWeight: 800, letterSpacing: -1.1, color: T.text1 }}>Welcome back</div>
+            <div style={{ marginTop: 7, fontSize: 12, color: T.text4 }}>{compactStats}</div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={onQuickAdd} style={dashPrimary}>Add to Vault</button>
+            <button onClick={onQuickAdd} style={dashPrimary}>Add</button>
             <button onClick={onImport} style={dashSecondary}>Import Sheet</button>
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(4,minmax(0,1fr))", gap: 10, marginTop: 18 }}>
-          {statCards.map((s) => <button key={s.label} onClick={() => s.label === "Folders" ? onNavigate("all") : null} style={{ textAlign: "left", border: `1px solid ${T.borderSub}`, borderRadius: 16, padding: 14, background: "rgba(0,0,0,0.22)", color: T.text1 }}>
-            <div style={{ width: 26, height: 3, borderRadius: 99, background: s.accent, marginBottom: 12 }} />
-            <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.8 }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: T.text4, marginTop: 3 }}>{s.label}</div>
-          </button>)}
-        </div>
+        {primary && (
+          <button onClick={() => onOpen(primary)} style={{ marginTop: 16, width: "100%", display: "flex", alignItems: "center", gap: 12, textAlign: "left", padding: 12, border: `1px solid ${T.borderSub}`, borderRadius: 16, background: "rgba(0,0,0,0.20)", color: T.text1, cursor: "pointer" }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.green, flexShrink: 0 }} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 11, color: T.text4, marginBottom: 3 }}>Pick up where you left off</div>
+              <div style={{ fontSize: 14, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{primary.title || primary.url}</div>
+            </div>
+          </button>
+        )}
       </div>
 
-      <DashboardRow title="Continue Watching" empty="No active videos yet." items={continueItems} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("continue")} />
-      <DashboardRow title="Last Watched" empty="Open an item and it will show here." items={recentlyViewed} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
-      <DashboardRow title="Top Rated" empty="Rate items to build this row." items={topRatedItems} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("rated")} />
-      <DashboardRow title="Recently Added" empty="Your newest saves appear here." items={recentlyAdded} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
+      <DashboardRow title="Continue Watching" empty="No active videos yet." items={continueItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("continue")} />
+      <DashboardRow title="Recently Added" empty="Your newest saves appear here." items={recentlyAdded.slice(0, 8)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
+      {topRatedItems.length > 0 && <DashboardRow title="Top Rated" empty="" items={topRatedItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("rated")} />}
     </div>
   );
 }

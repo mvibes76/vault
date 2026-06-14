@@ -5,6 +5,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 20 MB
 
+function normalizeDriveImageUrl(raw) {
+  const url = String(raw || "").trim();
+  const match = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:.*&)?id=)([a-zA-Z0-9_-]{20,})/);
+  if (!match) return url;
+  return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w1600`;
+}
+
 // External media proxy for thumbnails and scraped images only.
 // Fixes hotlink/referrer/CORS issues from Reddit and similar sites.
 // Non-image content types are rejected to prevent accidental video proxying
@@ -15,7 +22,7 @@ export async function GET(request) {
 
   if (!rawUrl) return NextResponse.json({ error: "Missing url" }, { status: 400 });
 
-  const checked = await validatePublicUrl(rawUrl);
+  const checked = await validatePublicUrl(normalizeDriveImageUrl(rawUrl));
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
   const target = checked.url;
 

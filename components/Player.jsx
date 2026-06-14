@@ -57,6 +57,9 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [quality, setQuality] = useState("auto");
   const [showComments, setShowComments] = useState(false);
   const [markNotice, setMarkNotice] = useState("");
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [driveFallback, setDriveFallback] = useState(false);
+  const backdropTap = useRef(0);
 
   // Extraction state (used when source.id === "extract")
   const [extracted, setExtracted] = useState(null); // { url, type, resolution } | null
@@ -76,7 +79,12 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     setQuality("auto");
     hlsRecoverCount.current = 0;
     setMarkNotice("");
+    setDriveFallback(false);
   }, [item.url]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") setIsTouchDevice(window.matchMedia?.("(pointer: coarse)")?.matches || window.innerWidth < 820);
+  }, []);
 
   // Set Twitch parent param from current hostname (required by Twitch embeds)
   useEffect(() => {
@@ -346,7 +354,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
   // ── Direct video resume ─────────────────────────────────────────────────
   useEffect(() => {
-    if (embed?.kind === "video" && videoRef.current && resumeAt > 2) {
+    if ((embed?.kind === "video" || embed?.kind === "drive") && videoRef.current && resumeAt > 2) {
       videoRef.current.currentTime = resumeAt;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,7 +379,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
   // ── Picture-in-Picture (direct/HLS only) ────────────────────────────────
   const pipSupported = typeof document !== "undefined" && "pictureInPictureEnabled" in document;
-  const canPip = (embed?.kind === "video" || embed?.kind === "hls") && pipSupported;
+  const canPip = (embed?.kind === "video" || embed?.kind === "hls" || (embed?.kind === "drive" && !driveFallback)) && pipSupported;
   const togglePiP = async () => {
     try {
       if (document.pictureInPictureElement) { await document.exitPictureInPicture(); setIsPiP(false); }
@@ -380,7 +388,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   };
 
   // ── Mute (best-effort across embed types) ───────────────────────────────
-  const canMute = embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api";
+  const canMute = embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback);
   const toggleMute = () => {
     setMuted((m) => {
       const next = !m;
@@ -399,24 +407,31 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     const dx = touch.current.x - e.changedTouches[0].clientX;
     const dy = touch.current.y - e.changedTouches[0].clientY;
     touch.current.x = touch.current.y = null;
-    if (dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.5) { handleClose(); return; }
+    if (!isTouchDevice && dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.5) { handleClose(); return; }
     if (Math.abs(dx) < 60) return;
     if (dx > 0 && hasNext) onNavigate?.(currentIdx + 1);
     if (dx < 0 && hasPrev) onNavigate?.(currentIdx - 1);
   };
 
-  const enhanceFilter = enhanceMode === "crisp" ? "contrast(1.08) saturate(1.05) brightness(1.02)" : enhanceMode === "cinema" ? "contrast(1.12) saturate(0.96) brightness(0.98)" : enhanceMode === "soft" ? "contrast(1.04) saturate(1.03)" : "none";
+  const enhanceFilter = enhanceMode === "crisp" ? "contrast(1.18) saturate(1.08) brightness(1.04)" : enhanceMode === "cinema" ? "contrast(1.14) saturate(0.96) brightness(0.98)" : enhanceMode === "soft" ? "contrast(1.05) saturate(1.03) brightness(1.01)" : "none";
 
-  const markMoment = (markRating = rating || 5) => {
-    const seconds = videoRef.current?.currentTime || ytPlayer.current?.getCurrentTime?.() || 0;
+  const markMoment = () => {
+    const seconds = videoRef.current?.currentTime || ytPlayer.current?.getCurrentTime?.() || Number(resumeAt || 0) || 0;
+    const markRating = rating || null;
     onAddMoment?.({ seconds, rating: markRating });
-    onRate?.(markRating);
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
-    setMarkNotice(`Marked ${mins}:${secs} · ★ ${markRating}`);
+    setMarkNotice(`Marked ${mins}:${secs}${markRating ? ` · ★ ${markRating}` : ""}`);
     if (markNoticeTimer.current) clearTimeout(markNoticeTimer.current);
     markNoticeTimer.current = setTimeout(() => setMarkNotice(""), 1800);
   };
+
+  const openPopout = useCallback(() => {
+    const target = (embed?.kind === "video" || embed?.kind === "hls") ? (mediaSrc || embed.src) :
+      embed?.kind === "drive" && !driveFallback ? embed.src : item.url;
+    try { window.open(target || item.url, "vaultPopout", "popup=yes,width=960,height=640,noopener,noreferrer"); }
+    catch { window.open(target || item.url, "_blank", "noopener,noreferrer"); }
+  }, [embed, mediaSrc, item.url, driveFallback]);
 
   // ── Render ──────────────────────────────────────────────────────────────
   const renderStage = () => {
@@ -444,9 +459,14 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           <Icon name="alert" size={28} style={{ color: T.text3, marginBottom: 12 }} />
           <div style={{ fontSize: 14, color: T.text2, marginBottom: 8 }}>{extractErr || "Couldn't find a playable video."}</div>
           <div style={{ fontSize: 11, color: T.text4, marginBottom: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.url}</div>
-          <a href={item.url} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`, borderRadius: 20, color: T.text1, fontSize: 12, textDecoration: "none" }}>
-            Open original <Icon name="external" size={12} />
-          </a>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+            <button onClick={(e) => { e.stopPropagation(); openPopout(); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(255,255,255,0.10)", border: `1px solid ${T.border}`, borderRadius: 20, color: T.text1, fontSize: 12, cursor: "pointer" }}>
+              Pop out <Icon name="external" size={12} />
+            </button>
+            <a href={item.url} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`, borderRadius: 20, color: T.text1, fontSize: 12, textDecoration: "none" }}>
+              Open original <Icon name="external" size={12} />
+            </a>
+          </div>
         </div>
       );
     }
@@ -530,6 +550,36 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       );
     }
 
+
+    if (embed.kind === "drive") {
+      if (driveFallback) {
+        return (
+          <div style={stageDrive(isFullscreen)}>
+            <iframe src={embed.preview} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen scrolling="no" style={frameInner} />
+            <RelayBadge text="Google Drive preview mode. Progress and Enhance only work when Drive allows direct playback." active={false} />
+          </div>
+        );
+      }
+      return (
+        <div style={mediaShell(isFullscreen)}>
+          <video
+            ref={videoRef}
+            src={embed.src}
+            controls autoPlay playsInline preload="metadata"
+            muted={muted}
+            onTimeUpdate={onTimeUpdate}
+            onError={() => setDriveFallback(true)}
+            onLoadedMetadata={onLoadedMetadata}
+            style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: isFullscreen ? 0 : 8, display: "block", background: "#000", filter: enhanceFilter }}
+          />
+        </div>
+      );
+    }
+
+    if (embed.kind === "pdf") {
+      return <PdfViewer src={embed.src} userId={userId} itemKey={item.key} resumeAt={resumeAt} />;
+    }
+
     if (embed.kind === "image") {
       return <ImageViewer src={embed.src} alt={item.title || ""} />;
     }
@@ -537,9 +587,17 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     return null;
   };
 
+  const handleBackdropClick = (e) => {
+    if (e.target !== e.currentTarget) return;
+    if (!isTouchDevice) { handleClose(); return; }
+    const now = Date.now();
+    if (now - backdropTap.current < 320) handleClose();
+    backdropTap.current = now;
+  };
+
   return (
     <div
-      onClick={handleClose}
+      onClick={handleBackdropClick}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
       style={{
@@ -551,7 +609,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     >
       {/* Top controls */}
       <div style={topControls}>
-        {(embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api") && (
+        {(embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback)) && (
           <select value={enhanceMode} onChange={(e) => { e.stopPropagation(); setEnhanceMode(e.target.value); }} onClick={(e) => e.stopPropagation()} style={selectBtn} title="View enhancement">
             <option value="off">Enhance Off</option>
             <option value="soft">Soft</option>
@@ -569,10 +627,13 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           {[1,2,3,4,5].map((n) => <button key={n} onClick={(e) => { e.stopPropagation(); onRate?.(rating === n ? null : n); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 16, padding: 1 }}>★</button>)}
         </div>
         <button onClick={(e) => { e.stopPropagation(); markMoment(); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Mark this timestamp">
-          Mark ★{rating || 5}
+          Mark
         </button>
         <button onClick={(e) => { e.stopPropagation(); setShowComments((v) => !v); }} style={{ ...ctrlBtn, background: showComments ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title="Comments">
           <Icon name="comment" size={15} />
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); openPopout(); }} style={ctrlBtn} title="Pop out player">
+          <Icon name="external" size={14} />
         </button>
         {(embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && !useRelay && (
           <button onClick={(e) => { e.stopPropagation(); setRelayReason("Using the secure relay path."); setUseRelay(true); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Use secure relay">
@@ -708,7 +769,38 @@ function CommentsPanel({ userId, itemKey, title, onClose }) {
   );
 }
 
+
+function PdfViewer({ src, userId, itemKey, resumeAt = 0 }) {
+  const [page, setPage] = useState(Math.max(1, Math.floor(Number(resumeAt || 1))));
+  const pageRef = useRef(page);
+
+  useEffect(() => { pageRef.current = page; }, [page]);
+  useEffect(() => () => { if (userId && itemKey) saveProgress(userId, itemKey, pageRef.current || 1, 0); }, [userId, itemKey]);
+
+  const setAndSave = (next) => {
+    const safe = Math.max(1, next);
+    setPage(safe);
+    if (userId && itemKey) saveProgress(userId, itemKey, safe, 0);
+  };
+
+  const pdfSrc = `${src}#page=${page}&toolbar=1&navpanes=0&view=FitH`;
+  return (
+    <div style={pdfShell}>
+      <iframe src={pdfSrc} title="PDF viewer" style={frameInner} />
+      <div style={pdfControls}>
+        <button onClick={(e) => { e.stopPropagation(); setAndSave(page - 1); }} style={pdfBtn}>Prev</button>
+        <div style={{ color: T.text1, fontSize: 12, minWidth: 72, textAlign: "center" }}>Page {page}</div>
+        <button onClick={(e) => { e.stopPropagation(); setAndSave(page + 1); }} style={pdfBtn}>Next</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Styles ─────────────────────────────────────────────────────────────────
+
+const pdfShell = { position: "relative", width: "min(96vw, 980px)", height: "min(86dvh, 900px)", background: "#111", borderRadius: 12, overflow: "hidden" };
+const pdfControls = { position: "absolute", left: "50%", bottom: 10, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, background: "rgba(0,0,0,0.62)", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 999, padding: 5, backdropFilter: "blur(12px)" };
+const pdfBtn = { padding: "7px 11px", borderRadius: 999, background: "rgba(255,255,255,0.10)", border: "none", color: T.text1, cursor: "pointer", fontSize: 12, fontWeight: 700 };
 
 const fullscreenStage = { width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#000" };
 

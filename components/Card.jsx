@@ -4,15 +4,17 @@ import { createPortal } from "react-dom";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { getThumb, getThumbCandidates, getSourceMeta } from "@/lib/sources";
+import { proxiedMediaUrl, normalizeCoverUrl } from "@/lib/utils";
 
 export default function Card({
   item, onOpen, viewMode = "grid",
   userData, onToggleFavorite, folders = [], onAssignFolder,
   isMobile, onRemoveQuickAdd, onMarkWatched, onSetRating,
-  onSelect, selected, onDragItem,
+  onSelect, selected, onDragItem, onEditItem,
 }) {
   const meta  = getSourceMeta(item.url);
-  const thumbCandidates = item.thumbnail ? [item.thumbnail, ...getThumbCandidates(item.url)] : getThumbCandidates(item.url);
+  const manualThumb = item.thumbnail ? proxiedMediaUrl(normalizeCoverUrl(item.thumbnail)) : "";
+  const thumbCandidates = manualThumb ? [manualThumb, ...getThumbCandidates(item.url)] : getThumbCandidates(item.url);
   const thumb = thumbCandidates[0] || getThumb(item.url);
   const u     = userData?.[item.key] || {};
   const fav   = !!u.favorite;
@@ -61,7 +63,7 @@ export default function Card({
           <div style={{ fontSize: 13, color: T.text1, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title || item.url}</div>
           <div style={{ fontSize: 11, color: T.text4, marginTop: 2 }}>{meta.name}{rating ? ` • ★ ${rating}` : ""}{watched ? " • watched" : ""}</div>
         </div>
-        <CardMenuButton {...{ item, fav, rating, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }} />
+        <CardMenuButton {...{ item, fav, rating, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, onEditItem, menuOpen, setMenuOpen, menuRef }} />
       </div>
     );
   }
@@ -154,7 +156,7 @@ export default function Card({
             </div>
             <div style={{ fontSize: 10, color: T.text4, marginTop: 3 }}>{rating ? `★ ${rating}` : (item.folder || item.tab || "")}</div>
           </div>
-          <CardMenuButton {...{ item, fav, rating, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }} />
+          <CardMenuButton {...{ item, fav, rating, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, onEditItem, menuOpen, setMenuOpen, menuRef }} />
         </div>
       )}
 
@@ -165,7 +167,7 @@ export default function Card({
   );
 }
 
-function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }) {
+function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, onEditItem, menuOpen, setMenuOpen, menuRef }) {
   const buttonRef = useRef(null);
   const [pos, setPos] = useState({ top: 0, left: 0, maxHeight: 420 });
 
@@ -202,6 +204,7 @@ function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAs
       }}
     >
       <MenuItem icon="star" label={fav ? "Unfavorite" : "Favorite"} onClick={() => { onToggleFavorite?.(item.key, fav); setMenuOpen(false); }} />
+      <MenuItem icon="settings" label="Edit item" onClick={() => { onEditItem?.(item); setMenuOpen(false); }} />
       <MenuItem icon="check" label="Mark watched" onClick={() => { onMarkWatched?.(item.key); setMenuOpen(false); }} />
       <div style={{ height: 1, background: T.borderSub, margin: "5px 0" }} />
       <div style={{ padding: "7px 10px 5px", color: T.text4, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>Rating</div>

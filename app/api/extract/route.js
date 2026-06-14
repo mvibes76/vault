@@ -30,6 +30,11 @@ export async function GET(request) {
   const parsed = checked.url;
 
   try {
+    const redditSources = await extractRedditSources(parsed);
+    if (redditSources.sources.length) {
+      return NextResponse.json(redditSources, { headers: { "Cache-Control": "no-store" } });
+    }
+
     const res = await safeFetch(parsed.href, {
       headers: {
         "User-Agent": UA,
@@ -73,6 +78,47 @@ export async function GET(request) {
     });
   } catch (e) {
     return NextResponse.json({ error: e.message || "Extraction failed" }, { status: 502 });
+  }
+}
+
+
+async function extractRedditSources(parsed) {
+  const host = parsed.hostname.replace(/^www\./, "");
+  if (!/(^|\.)reddit\.com$/i.test(host)) return { sources: [] };
+  if (!/\/comments\//i.test(parsed.pathname)) return { sources: [] };
+
+  const jsonUrl = parsed.href.replace(/\/?(?:\?.*)?$/, ".json");
+  try {
+    const res = await safeFetch(jsonUrl, {
+      headers: {
+        "User-Agent": UA,
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!res.ok) return { sources: [] };
+    const data = await res.json();
+    const post = data?.[0]?.data?.children?.[0]?.data;
+    if (!post) return { sources: [] };
+    const rv = post.secure_media?.reddit_video || post.media?.reddit_video || post.preview?.reddit_video_preview;
+    const found = [];
+    const add = (url, resolution, type) => {
+      if (!url) return;
+      const clean = String(url).replace(/&amp;/g, "&");
+      if (!found.some((s) => s.url === clean)) found.push({ url: clean, resolution: resolution || null, type: type || null });
+    };
+    add(rv?.hls_url, rv?.height, "application/vnd.apple.mpegurl");
+    add(rv?.fallback_url, rv?.height, "video/mp4");
+    add(rv?.dash_url, rv?.height, "application/dash+xml");
+    // Prefer HLS/fallback over DASH because the current browser player handles those.
+    return {
+      sources: found.filter((s) => !/dash\+xml|\.mpd/i.test(s.type || s.url)),
+      title: post.title || null,
+    };
+  } catch {
+    return { sources: [] };
   }
 }
 

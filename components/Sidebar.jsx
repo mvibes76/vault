@@ -45,7 +45,7 @@ function SectionLabel({ collapsed, children }) {
 }
 
 export default function Sidebar({
-  tabs, activeView, onNavigate, folders, onCreateFolder, onDeleteFolder,
+  tabs, activeView, onNavigate, folders, onCreateFolder, onDeleteFolder, onRenameFolder,
   counts, onSignOut, userEmail, collapsed, onToggleCollapse,
   mobile = false, open = true, onClose, onDropItemToFolder,
 }) {
@@ -120,23 +120,34 @@ export default function Sidebar({
               <NavItem {...np} id={`folder:${f.name}`} icon="folder" label={f.name} count={counts[`folder:${f.name}`]} />
             </div>
             {!collapsed && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const ok = window.confirm(`Delete folder "${f.name}"? Items stay in your vault and move to No folder.`);
-                  if (ok) onDeleteFolder?.(f.name);
-                }}
-                title={`Delete ${f.name}`}
-                style={{
-                  width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  background: "transparent", border: "none", color: T.text4, cursor: "pointer",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,80,80,0.10)"; e.currentTarget.style.color = "#ff8f8f"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text4; }}
-              >
-                <Icon name="trash" size={12} />
-              </button>
+              <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const next = window.prompt("Rename folder", f.name);
+                    if (next && next.trim() && next.trim() !== f.name) onRenameFolder?.(f.name, next.trim());
+                  }}
+                  title={`Rename ${f.name}`}
+                  style={folderActionBtn}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = T.text1; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text4; }}
+                >
+                  <Icon name="settings" size={12} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const ok = window.confirm(`Delete folder "${f.name}"? Items stay in your vault and move to No folder.`);
+                    if (ok) onDeleteFolder?.(f.name);
+                  }}
+                  title={`Delete ${f.name}`}
+                  style={folderActionBtn}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,80,80,0.10)"; e.currentTarget.style.color = "#ff8f8f"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text4; }}
+                >
+                  <Icon name="trash" size={12} />
+                </button>
+              </div>
             )}
           </div>
         ))}
@@ -181,3 +192,10 @@ export default function Sidebar({
     </>
   );
 }
+
+
+const folderActionBtn = {
+  width: 26, height: 28, borderRadius: 7, flexShrink: 0,
+  display: "flex", alignItems: "center", justifyContent: "center",
+  background: "transparent", border: "none", color: T.text4, cursor: "pointer",
+};

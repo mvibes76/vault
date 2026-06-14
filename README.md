@@ -70,3 +70,26 @@ Folder identity is case-insensitive. Existing folder casing wins. If `Main` exis
 - Drag cards to folders on desktop.
 
 Run `sql/schema.sql` again after deploying v19.
+
+
+## v21
+
+Adds pop-out playback fallback, PDF page viewer with last-page memory, Google Drive direct-play progress when available, edit item, rename folder, keyword folder auto-assignment, cover rules, and a cleaner dashboard. Run `sql/schema.sql` again for the `cover_rules` settings column.
+
+
+## v22 Cover Library
+
+Settings now includes a **Covers** tab. Use it as a running library of subject covers.
+
+Example covers:
+
+```txt
+Label: Darth Maul
+Image URL: https://.../darth-maul.jpg
+Match against: Tag
+Keywords: Darth Maul, Maul, Sith
+```
+
+The app can match covers against title, tags, folder, source, URL, or any field. Google Drive image file links are supported through the media proxy.
+
+Run `sql/schema.sql` after updating to v22 so Supabase creates `vault_covers` and adds `vault_items.thumbnail_source`.

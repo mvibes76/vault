@@ -74,6 +74,7 @@ function parseSheetRows(csv, tabName) {
       type: clean(row, typeIdx) || "link",
       source: clean(row, sourceIdx) || undefined,
       thumbnail: clean(row, thumbIdx),
+      thumbnail_source: clean(row, thumbIdx) ? "sheet" : null,
       importedFrom: tabName,
       addedAt: new Date().toISOString(),
       isVaultItem: true,

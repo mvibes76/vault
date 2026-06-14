@@ -136,3 +136,33 @@ alter table user_data add column if not exists completed_count int default 0;
 alter table user_data add column if not exists watch_seconds real default 0;
 create index if not exists idx_user_data_last_viewed on user_data(user_id, last_viewed_at);
 create index if not exists idx_user_data_view_count on user_data(user_id, view_count);
+
+-- v21: cover rules stored in user settings and edit/dashboard refinements. Safe to rerun.
+alter table user_settings add column if not exists cover_rules jsonb default '[]'::jsonb;
+
+-- v22: cover library. Safe to rerun.
+alter table vault_items add column if not exists thumbnail_source text;
+
+create table if not exists vault_covers (
+  id          uuid default gen_random_uuid() primary key,
+  user_id     uuid references auth.users on delete cascade not null,
+  label       text not null,
+  thumbnail   text not null,
+  match_type  text default 'any' check (match_type in ('any','tag','title','folder','source','url')),
+  keywords    text[] default '{}',
+  note        text,
+  priority    int default 100,
+  enabled     boolean default true,
+  created_at  timestamptz default now(),
+  updated_at  timestamptz default now()
+);
+
+alter table vault_covers enable row level security;
+
+do $$ begin
+  create policy "own vault_covers" on vault_covers for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+
+create index if not exists idx_vault_covers_user on vault_covers(user_id);
+create index if not exists idx_vault_covers_enabled on vault_covers(user_id, enabled);
+create index if not exists idx_vault_items_thumbnail_source on vault_items(user_id, thumbnail_source);

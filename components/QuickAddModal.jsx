@@ -5,12 +5,13 @@ import { itemKey } from "@/lib/utils";
 import { getSourceMeta } from "@/lib/sources";
 import { T } from "@/lib/theme";
 
-export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFolder }) {
-  const [url, setUrl]     = useState("");
-  const [title, setTitle] = useState("");
-  const [note, setNote]   = useState("");
-  const [tags, setTags]   = useState("");
-  const [folder, setFolder] = useState("");
+export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFolder, initialItem = null, mode = "add" }) {
+  const [url, setUrl]     = useState(initialItem?.url || "");
+  const [title, setTitle] = useState(initialItem?.title || "");
+  const [note, setNote]   = useState(initialItem?.note || "");
+  const [tags, setTags]   = useState(Array.isArray(initialItem?.tags) ? initialItem.tags.join(", ") : "");
+  const [folder, setFolder] = useState(initialItem?.folder || "");
+  const [thumbnail, setThumbnail] = useState(initialItem?.thumbnail_source === "cover_library" ? "" : (initialItem?.thumbnail || ""));
   const [pasting, setPasting] = useState(false);
   const [preflight, setPreflight] = useState({ state: "idle", msg: "" }); // idle | checking | ok | fail
   const [metadata, setMetadata] = useState(null);
@@ -22,17 +23,19 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
   // Read clipboard on mount
   useEffect(() => {
     const read = async () => {
-      try {
-        const text = await navigator.clipboard.readText();
-        if (text?.startsWith("http")) setUrl(text.trim());
-      } catch {}
+      if (!initialItem) {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text?.startsWith("http")) setUrl(text.trim());
+        } catch {}
+      }
       urlRef.current?.focus();
     };
     read();
     const h = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
+  }, [onClose, initialItem]);
 
   const meta = url ? getSourceMeta(url) : null;
   const isKnown = meta && meta.id !== "extract";
@@ -79,6 +82,7 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
         setMetadataState("ok");
         setTitle((prev) => prev || j.title || "");
         setNote((prev) => prev || j.description || "");
+        setThumbnail((prev) => prev || j.thumbnail || "");
       } catch {
         if (!cancelled) { setMetadata(null); setMetadataState("fail"); }
       }
@@ -113,21 +117,32 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
 
   const handleAdd = async () => {
     if (!canAdd) return;
+    const manualThumb = thumbnail.trim();
+    const autoThumb = metadata?.thumbnail || "";
+    const resolvedThumb = manualThumb || autoThumb || initialItem?.thumbnail || "";
+    const thumbSource = manualThumb
+      ? "manual"
+      : autoThumb
+        ? "metadata"
+        : initialItem?.thumbnail_source || null;
     const item = {
       id: `qa-${Date.now()}`,
       key: itemKey(url.trim()),
+      previousKey: initialItem?.key,
       url: url.trim(),
       title: title.trim() || url.trim(),
       note: note.trim(),
       tags: tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
       source: meta?.id,
-      thumbnail: metadata?.thumbnail || "",
-      type: metadata?.type || "link",
+      thumbnail: resolvedThumb,
+      thumbnail_source: thumbSource,
+      type: metadata?.type || initialItem?.type || "link",
       siteName: metadata?.siteName || "",
       folder: folder || null,
       tab: folder || "Vault Library",
       isVaultItem: true,
-      addedAt: new Date().toISOString(),
+      addedAt: initialItem?.addedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     onAdd(item);
     onClose();
@@ -150,7 +165,7 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
         </div>
 
         <div style={{ padding: "4px 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: T.text1 }}>Add to Vault</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: T.text1 }}>{mode === "edit" ? "Edit Vault Item" : "Add to Vault"}</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.text3, cursor: "pointer", padding: 4 }}>
             <Icon name="x" size={18} />
           </button>
@@ -227,12 +242,18 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
           />
 
-          {metadata?.thumbnail && (
+          <input
+            value={thumbnail} onChange={(e) => setThumbnail(e.target.value)}
+            placeholder="Cover image URL (optional)"
+            style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
+          />
+
+          {(thumbnail || metadata?.thumbnail) && (
             <div style={{ display: "flex", gap: 10, alignItems: "center", padding: 8, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: `1px solid ${T.borderSub}` }}>
-              <img src={`/api/media?url=${encodeURIComponent(metadata.thumbnail)}`} alt="" style={{ width: 72, height: 44, objectFit: "cover", borderRadius: 7, flexShrink: 0 }} />
+              <img src={`/api/media?url=${encodeURIComponent(thumbnail || metadata?.thumbnail)}`} alt="" style={{ width: 72, height: 44, objectFit: "cover", borderRadius: 7, flexShrink: 0 }} />
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{metadata.title || "Metadata found"}</div>
-                <div style={{ fontSize: 10, color: T.text4, marginTop: 2 }}>{metadata.siteName || "Link preview"}</div>
+                <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title || metadata?.title || "Cover preview"}</div>
+                <div style={{ fontSize: 10, color: T.text4, marginTop: 2 }}>{metadata?.siteName || "Manual cover"}</div>
               </div>
             </div>
           )}
@@ -282,7 +303,7 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
               marginTop: 4,
             }}
           >
-            Add to Vault
+            {mode === "edit" ? "Save Changes" : "Add to Vault"}
           </button>
         </div>
       </div>
