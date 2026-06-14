@@ -25,6 +25,9 @@ const emptyCover = {
   note: "",
   priority: 100,
   enabled: true,
+  cover_fit: "cover",
+  cover_position_x: 50,
+  cover_position_y: 50,
 };
 
 function coverToForm(cover) {
@@ -38,6 +41,9 @@ function coverToForm(cover) {
     note: cover.note || "",
     priority: Number.isFinite(Number(cover.priority)) ? Number(cover.priority) : 100,
     enabled: cover.enabled !== false,
+    cover_fit: cover.cover_fit || "cover",
+    cover_position_x: Number.isFinite(Number(cover.cover_position_x)) ? Number(cover.cover_position_x) : 50,
+    cover_position_y: Number.isFinite(Number(cover.cover_position_y)) ? Number(cover.cover_position_y) : 50,
   };
 }
 
@@ -117,6 +123,9 @@ export default function ConfigModal({
       note: coverForm.note.trim(),
       priority: Number.isFinite(Number(coverForm.priority)) ? Number(coverForm.priority) : 100,
       enabled: coverForm.enabled !== false,
+      cover_fit: coverForm.cover_fit || "cover",
+      cover_position_x: Number(coverForm.cover_position_x) || 50,
+      cover_position_y: Number(coverForm.cover_position_y) || 50,
     });
     setCoverForm(emptyCover);
   };
@@ -213,7 +222,20 @@ export default function ConfigModal({
 
               {previewUrl && (
                 <div style={{ marginTop: 10, borderRadius: 12, overflow: "hidden", border: `1px solid ${T.borderSub}`, background: "rgba(255,255,255,0.035)", aspectRatio: "4 / 5" }}>
-                  <img src={previewUrl} alt="Cover preview" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  <img src={previewUrl} alt="Cover preview" style={{ width: "100%", height: "100%", objectFit: coverForm.cover_fit || "cover", objectPosition: `${coverForm.cover_position_x || 50}% ${coverForm.cover_position_y || 50}%`, display: "block" }} />
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+                <button type="button" onClick={() => setCoverForm((f) => ({ ...f, cover_fit: "cover" }))} style={{ padding: "8px 10px", borderRadius: 9, border: `1px solid ${coverForm.cover_fit !== "contain" ? T.borderHov : T.border}`, background: coverForm.cover_fit !== "contain" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)", color: coverForm.cover_fit !== "contain" ? T.text1 : T.text4, fontSize: 11, fontWeight: 800, cursor: "pointer" }}>Fill crop</button>
+                <button type="button" onClick={() => setCoverForm((f) => ({ ...f, cover_fit: "contain" }))} style={{ padding: "8px 10px", borderRadius: 9, border: `1px solid ${coverForm.cover_fit === "contain" ? T.borderHov : T.border}`, background: coverForm.cover_fit === "contain" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)", color: coverForm.cover_fit === "contain" ? T.text1 : T.text4, fontSize: 11, fontWeight: 800, cursor: "pointer" }}>Fit full</button>
+              </div>
+              {(coverForm.cover_fit || "cover") !== "contain" && (
+                <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                  <label style={{ fontSize: 10, color: T.text4 }}>Horizontal crop {coverForm.cover_position_x || 50}%</label>
+                  <input type="range" min="0" max="100" value={coverForm.cover_position_x || 50} onChange={(e) => setCoverForm((f) => ({ ...f, cover_position_x: e.target.value }))} />
+                  <label style={{ fontSize: 10, color: T.text4 }}>Vertical crop {coverForm.cover_position_y || 50}%</label>
+                  <input type="range" min="0" max="100" value={coverForm.cover_position_y || 50} onChange={(e) => setCoverForm((f) => ({ ...f, cover_position_y: e.target.value }))} />
                 </div>
               )}
 
@@ -294,7 +316,7 @@ function CoverRow({ cover, onEdit, onDelete }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "58px 1fr auto", gap: 10, alignItems: "center", padding: 9, border: `1px solid ${T.borderSub}`, borderRadius: 12, background: cover.enabled === false ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.045)", opacity: cover.enabled === false ? 0.55 : 1 }}>
       <div style={{ width: 58, aspectRatio: "4 / 5", borderRadius: 9, overflow: "hidden", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.borderSub}` }}>
-        <img src={proxiedMediaUrl(normalizeCoverUrl(cover.thumbnail))} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        <img src={proxiedMediaUrl(normalizeCoverUrl(cover.thumbnail))} alt="" style={{ width: "100%", height: "100%", objectFit: cover.cover_fit || "cover", objectPosition: `${cover.cover_position_x || 50}% ${cover.cover_position_y || 50}%`, display: "block" }} />
       </div>
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>

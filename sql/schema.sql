@@ -166,3 +166,14 @@ exception when duplicate_object then null; end $$;
 create index if not exists idx_vault_covers_user on vault_covers(user_id);
 create index if not exists idx_vault_covers_enabled on vault_covers(user_id, enabled);
 create index if not exists idx_vault_items_thumbnail_source on vault_items(user_id, thumbnail_source);
+
+
+-- v23: per-item cover behavior and crop controls. Safe to rerun.
+alter table vault_items add column if not exists cover_mode text default 'auto' check (cover_mode in ('auto','original','manual'));
+alter table vault_items add column if not exists cover_fit text default 'cover' check (cover_fit in ('cover','contain'));
+alter table vault_items add column if not exists cover_position_x int default 50;
+alter table vault_items add column if not exists cover_position_y int default 50;
+alter table vault_covers add column if not exists cover_fit text default 'cover' check (cover_fit in ('cover','contain'));
+alter table vault_covers add column if not exists cover_position_x int default 50;
+alter table vault_covers add column if not exists cover_position_y int default 50;
+create index if not exists idx_vault_items_cover_mode on vault_items(user_id, cover_mode);

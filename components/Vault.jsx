@@ -212,23 +212,37 @@ export default function Vault() {
 
   const applyCoverRules = useCallback((item) => {
     if (!item) return item;
-    // Manual per-item covers should always win. Metadata/Sheet/provider covers can be made uniform by the Cover Library.
-    if (item.thumbnail && item.thumbnail_source === "manual") return item;
+
+    // Per-item choices win.
+    // manual = custom cover or imported Sheet thumbnail.
+    // original = keep provider/source/metadata cover and bypass uniform Cover Library.
+    const mode = item.cover_mode || (item.thumbnail_source === "manual" || item.thumbnail_source === "sheet" ? "manual" : "auto");
+    if (mode === "manual" || item.thumbnail_source === "manual" || item.thumbnail_source === "sheet") return { ...item, cover_mode: "manual" };
+    if (mode === "original") return { ...item, cover_mode: "original" };
 
     const sortedCovers = [...(coverLibrary || [])]
       .filter((c) => c?.enabled !== false && c?.thumbnail)
       .sort((a, b) => Number(a.priority || 100) - Number(b.priority || 100));
     const cover = sortedCovers.find((c) => matchesCoverRule(item, c));
     if (cover?.thumbnail) {
-      return { ...item, thumbnail: cover.thumbnail, thumbnail_source: "cover_library", cover_label: cover.label };
+      return {
+        ...item,
+        thumbnail: cover.thumbnail,
+        thumbnail_source: "cover_library",
+        cover_mode: "auto",
+        cover_label: cover.label,
+        cover_fit: cover.cover_fit || item.cover_fit || "cover",
+        cover_position_x: Number.isFinite(Number(cover.cover_position_x)) ? Number(cover.cover_position_x) : (item.cover_position_x || 50),
+        cover_position_y: Number.isFinite(Number(cover.cover_position_y)) ? Number(cover.cover_position_y) : (item.cover_position_y || 50),
+      };
     }
 
     // Legacy support for old text rules saved in user_settings.cover_rules.
     if (!item.thumbnail && coverRules.length) {
       const legacy = coverRules.find((r) => matchesCoverRule(item, { label: r.tag, keywords: [r.tag], thumbnail: r.thumbnail, match_type: "any", enabled: true }));
-      if (legacy?.thumbnail) return { ...item, thumbnail: legacy.thumbnail, thumbnail_source: "cover_rule" };
+      if (legacy?.thumbnail) return { ...item, thumbnail: legacy.thumbnail, thumbnail_source: "cover_rule", cover_mode: "auto" };
     }
-    return item;
+    return { ...item, cover_mode: mode };
   }, [coverLibrary, coverRules]);
 
   const inferFolderForItem = useCallback((item) => {
@@ -325,6 +339,9 @@ export default function Vault() {
       keywords: Array.isArray(cover.keywords) ? cover.keywords : [],
       enabled: cover.enabled !== false,
       priority: Number.isFinite(Number(cover.priority)) ? Number(cover.priority) : 100,
+      cover_fit: cover.cover_fit || "cover",
+      cover_position_x: Number.isFinite(Number(cover.cover_position_x)) ? Number(cover.cover_position_x) : 50,
+      cover_position_y: Number.isFinite(Number(cover.cover_position_y)) ? Number(cover.cover_position_y) : 50,
     };
     setCoverLibrary((prev) => [local, ...prev.filter((c) => c.id !== local.id)].sort((a, b) => Number(a.priority || 100) - Number(b.priority || 100) || String(a.label || "").localeCompare(String(b.label || ""))));
     if (user) {

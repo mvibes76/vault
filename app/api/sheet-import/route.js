@@ -49,7 +49,11 @@ function parseSheetRows(csv, tabName) {
   const noteIdx = headerIndex(headers, ["note", "notes", "description", "desc", "caption", "comment"]);
   const typeIdx = headerIndex(headers, ["type", "media_type"]);
   const sourceIdx = headerIndex(headers, ["source", "platform", "provider"]);
-  const thumbIdx = headerIndex(headers, ["thumbnail", "thumb", "image", "poster"]);
+  const thumbIdx = headerIndex(headers, ["thumbnail", "thumb", "image", "poster", "cover", "cover_url", "custom_cover"]);
+  const coverModeIdx = headerIndex(headers, ["cover_mode", "cover_behavior", "use_original_cover"]);
+  const coverFitIdx = headerIndex(headers, ["cover_fit", "cover_sizing", "sizing", "fit"]);
+  const coverXIdx = headerIndex(headers, ["cover_x", "cover_position_x", "crop_x", "x"]);
+  const coverYIdx = headerIndex(headers, ["cover_y", "cover_position_y", "crop_y", "y"]);
 
   if (urlIdx < 0) return { items: [], skipped: Math.max(0, rows.length - 1), warning: `No URL column found on ${tabName}.` };
 
@@ -63,6 +67,12 @@ function parseSheetRows(csv, tabName) {
     const title = clean(row, titleIdx) || url;
     const folder = clean(row, folderIdx) || tabName;
     const tags = clean(row, tagsIdx).split(/[,;]/).map((t) => t.trim()).filter(Boolean);
+    const thumb = clean(row, thumbIdx);
+    const rawCoverMode = clean(row, coverModeIdx).toLowerCase();
+    const coverMode = thumb ? "manual" : ["original", "source", "keep", "true", "yes", "1"].includes(rawCoverMode) ? "original" : "auto";
+    const fit = clean(row, coverFitIdx).toLowerCase() === "contain" || clean(row, coverFitIdx).toLowerCase() === "fit" ? "contain" : "cover";
+    const posX = Number(clean(row, coverXIdx));
+    const posY = Number(clean(row, coverYIdx));
     items.push({
       key: itemKey(url),
       id: `${tabName}-${itemKey(url)}`,
@@ -73,8 +83,12 @@ function parseSheetRows(csv, tabName) {
       note: clean(row, noteIdx),
       type: clean(row, typeIdx) || "link",
       source: clean(row, sourceIdx) || undefined,
-      thumbnail: clean(row, thumbIdx),
-      thumbnail_source: clean(row, thumbIdx) ? "sheet" : null,
+      thumbnail: thumb,
+      thumbnail_source: thumb ? "sheet" : null,
+      cover_mode: coverMode,
+      cover_fit: fit,
+      cover_position_x: Number.isFinite(posX) ? Math.max(0, Math.min(100, posX)) : 50,
+      cover_position_y: Number.isFinite(posY) ? Math.max(0, Math.min(100, posY)) : 50,
       importedFrom: tabName,
       addedAt: new Date().toISOString(),
       isVaultItem: true,

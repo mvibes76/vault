@@ -93,3 +93,8 @@ Keywords: Darth Maul, Maul, Sith
 The app can match covers against title, tags, folder, source, URL, or any field. Google Drive image file links are supported through the media proxy.
 
 Run `sql/schema.sql` after updating to v22 so Supabase creates `vault_covers` and adds `vault_items.thumbnail_source`.
+
+
+## v23 Cover Controls
+
+Run `sql/schema.sql` after deploying. v23 adds per-item cover behavior, crop/sizing controls, Sheet cover import fields, and Cover Library crop controls.

@@ -11,7 +11,11 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
   const [note, setNote]   = useState(initialItem?.note || "");
   const [tags, setTags]   = useState(Array.isArray(initialItem?.tags) ? initialItem.tags.join(", ") : "");
   const [folder, setFolder] = useState(initialItem?.folder || "");
+  const [coverMode, setCoverMode] = useState(initialItem?.cover_mode || (initialItem?.thumbnail_source === "manual" || initialItem?.thumbnail_source === "sheet" ? "manual" : "auto"));
   const [thumbnail, setThumbnail] = useState(initialItem?.thumbnail_source === "cover_library" ? "" : (initialItem?.thumbnail || ""));
+  const [coverFit, setCoverFit] = useState(initialItem?.cover_fit || "cover");
+  const [coverX, setCoverX] = useState(Number.isFinite(Number(initialItem?.cover_position_x)) ? Number(initialItem.cover_position_x) : 50);
+  const [coverY, setCoverY] = useState(Number.isFinite(Number(initialItem?.cover_position_y)) ? Number(initialItem.cover_position_y) : 50);
   const [pasting, setPasting] = useState(false);
   const [preflight, setPreflight] = useState({ state: "idle", msg: "" }); // idle | checking | ok | fail
   const [metadata, setMetadata] = useState(null);
@@ -82,13 +86,13 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
         setMetadataState("ok");
         setTitle((prev) => prev || j.title || "");
         setNote((prev) => prev || j.description || "");
-        setThumbnail((prev) => prev || j.thumbnail || "");
+        setThumbnail((prev) => prev || (coverMode !== "auto" ? j.thumbnail || "" : ""));
       } catch {
         if (!cancelled) { setMetadata(null); setMetadataState("fail"); }
       }
     }, 500);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [url]);
+  }, [url, coverMode]);
 
   const canAdd = /^https?:\/\//i.test(url.trim());
 
@@ -119,12 +123,16 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
     if (!canAdd) return;
     const manualThumb = thumbnail.trim();
     const autoThumb = metadata?.thumbnail || "";
-    const resolvedThumb = manualThumb || autoThumb || initialItem?.thumbnail || "";
-    const thumbSource = manualThumb
+    const resolvedThumb = coverMode === "manual"
+      ? manualThumb
+      : coverMode === "original"
+        ? (manualThumb || autoThumb || initialItem?.thumbnail || "")
+        : (autoThumb || initialItem?.thumbnail || "");
+    const thumbSource = coverMode === "manual"
       ? "manual"
-      : autoThumb
-        ? "metadata"
-        : initialItem?.thumbnail_source || null;
+      : coverMode === "original"
+        ? (manualThumb ? "original" : autoThumb ? "metadata" : initialItem?.thumbnail_source || null)
+        : (autoThumb ? "metadata" : initialItem?.thumbnail_source || null);
     const item = {
       id: `qa-${Date.now()}`,
       key: itemKey(url.trim()),
@@ -136,6 +144,10 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
       source: meta?.id,
       thumbnail: resolvedThumb,
       thumbnail_source: thumbSource,
+      cover_mode: coverMode,
+      cover_fit: coverFit,
+      cover_position_x: Number(coverX) || 50,
+      cover_position_y: Number(coverY) || 50,
       type: metadata?.type || initialItem?.type || "link",
       siteName: metadata?.siteName || "",
       folder: folder || null,
@@ -242,18 +254,51 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
             style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
           />
 
-          <input
-            value={thumbnail} onChange={(e) => setThumbnail(e.target.value)}
-            placeholder="Cover image URL (optional)"
-            style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
-          />
+          <div style={{ border: `1px solid ${T.borderSub}`, borderRadius: 12, padding: 10, background: "rgba(255,255,255,0.035)", display: "grid", gap: 9 }}>
+            <div style={{ fontSize: 11, color: T.text3, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>Cover behavior</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              {[
+                ["auto", "Auto"],
+                ["original", "Original"],
+                ["manual", "Custom"],
+              ].map(([value, label]) => (
+                <button key={value} type="button" onClick={() => setCoverMode(value)} style={{ padding: "8px 6px", borderRadius: 9, border: `1px solid ${coverMode === value ? T.borderHov : T.border}`, background: coverMode === value ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)", color: coverMode === value ? T.text1 : T.text4, fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: T.text4, lineHeight: 1.35 }}>
+              Auto uses your Cover Library. Original keeps the source/metadata cover. Custom bypasses automatic covers.
+            </div>
+
+            {coverMode !== "auto" && (
+              <input
+                value={thumbnail} onChange={(e) => setThumbnail(e.target.value)}
+                placeholder={coverMode === "original" ? "Original cover URL, optional" : "Custom cover image URL"}
+                style={{ padding: "11px 14px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" }}
+              />
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button type="button" onClick={() => setCoverFit("cover")} style={{ padding: "8px 10px", borderRadius: 9, border: `1px solid ${coverFit === "cover" ? T.borderHov : T.border}`, background: coverFit === "cover" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)", color: coverFit === "cover" ? T.text1 : T.text4, fontSize: 11, fontWeight: 800, cursor: "pointer" }}>Fill crop</button>
+              <button type="button" onClick={() => setCoverFit("contain")} style={{ padding: "8px 10px", borderRadius: 9, border: `1px solid ${coverFit === "contain" ? T.borderHov : T.border}`, background: coverFit === "contain" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)", color: coverFit === "contain" ? T.text1 : T.text4, fontSize: 11, fontWeight: 800, cursor: "pointer" }}>Fit full</button>
+            </div>
+            {coverFit === "cover" && (
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 10, color: T.text4 }}>Horizontal crop {coverX}%</label>
+                <input type="range" min="0" max="100" value={coverX} onChange={(e) => setCoverX(e.target.value)} />
+                <label style={{ fontSize: 10, color: T.text4 }}>Vertical crop {coverY}%</label>
+                <input type="range" min="0" max="100" value={coverY} onChange={(e) => setCoverY(e.target.value)} />
+              </div>
+            )}
+          </div>
 
           {(thumbnail || metadata?.thumbnail) && (
             <div style={{ display: "flex", gap: 10, alignItems: "center", padding: 8, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: `1px solid ${T.borderSub}` }}>
-              <img src={`/api/media?url=${encodeURIComponent(thumbnail || metadata?.thumbnail)}`} alt="" style={{ width: 72, height: 44, objectFit: "cover", borderRadius: 7, flexShrink: 0 }} />
+              <img src={`/api/media?url=${encodeURIComponent(thumbnail || metadata?.thumbnail)}`} alt="" style={{ width: 72, aspectRatio: "4 / 5", objectFit: coverFit, objectPosition: `${coverX}% ${coverY}%`, borderRadius: 7, flexShrink: 0, background: "#050505" }} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title || metadata?.title || "Cover preview"}</div>
-                <div style={{ fontSize: 10, color: T.text4, marginTop: 2 }}>{metadata?.siteName || "Manual cover"}</div>
+                <div style={{ fontSize: 10, color: T.text4, marginTop: 2 }}>{coverMode === "auto" ? "Auto cover preview" : coverMode === "original" ? "Original/source cover" : "Custom cover"}</div>
               </div>
             </div>
           )}

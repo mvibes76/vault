@@ -33,7 +33,10 @@ export default function Card({
     if (next < thumbCandidates.length) setThumbIndex(next);
     else setImgFailed(true);
   };
-  const thumbStyle = { width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block", background: "#000" };
+  const coverFit = item.cover_fit || "cover";
+  const coverX = Number.isFinite(Number(item.cover_position_x)) ? Number(item.cover_position_x) : 50;
+  const coverY = Number.isFinite(Number(item.cover_position_y)) ? Number(item.cover_position_y) : 50;
+  const thumbStyle = { width: "100%", height: "100%", objectFit: coverFit, objectPosition: `${coverX}% ${coverY}%`, display: "block", background: "#000" };
 
   useEffect(() => {
     if (!menuOpen) return;

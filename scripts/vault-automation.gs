@@ -13,7 +13,7 @@
 const VAULT_SHEET_NAME = 'Vault Library';
 const HEADERS = [
   'Item Key', 'Title', 'URL', 'Folder', 'Tags', 'Notes', 'Type', 'Source',
-  'Thumbnail', 'Created At', 'Updated At', 'Last Action'
+  'Thumbnail', 'Cover Mode', 'Cover Fit', 'Cover X', 'Cover Y', 'Created At', 'Updated At', 'Last Action'
 ];
 
 function doPost(e) {
@@ -65,6 +65,10 @@ function processItem_(sheet, payload) {
     payload.type || 'link',
     payload.source || '',
     payload.thumbnail || '',
+    payload.cover_mode || '',
+    payload.cover_fit || '',
+    payload.cover_position_x || '',
+    payload.cover_position_y || '',
     payload.addedAt || payload.created_at || now,
     now,
     payload.action || 'upsert'
