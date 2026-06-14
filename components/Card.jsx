@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
-import { getThumb, getSourceMeta } from "@/lib/sources";
+import { getThumb, getThumbCandidates, getSourceMeta } from "@/lib/sources";
 
 export default function Card({
   item, onOpen, viewMode = "grid",
@@ -12,7 +12,8 @@ export default function Card({
   onSelect, selected, onDragItem,
 }) {
   const meta  = getSourceMeta(item.url);
-  const thumb = item.thumbnail || getThumb(item.url);
+  const thumbCandidates = item.thumbnail ? [item.thumbnail, ...getThumbCandidates(item.url)] : getThumbCandidates(item.url);
+  const thumb = thumbCandidates[0] || getThumb(item.url);
   const u     = userData?.[item.key] || {};
   const fav   = !!u.favorite;
   const progress = u.progress > 0 && u.duration > 0 ? Math.min(1, u.progress / u.duration) : 0;
@@ -21,8 +22,16 @@ export default function Card({
   const isQuickAdd = !!item.isQuickAdd || item.tab === "Quick Adds";
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [thumbIndex, setThumbIndex] = useState(0);
   const [imgFailed, setImgFailed] = useState(false);
   const menuRef = useRef(null);
+  const activeThumb = thumbCandidates[thumbIndex] || thumb;
+  const handleThumbError = () => {
+    const next = thumbIndex + 1;
+    if (next < thumbCandidates.length) setThumbIndex(next);
+    else setImgFailed(true);
+  };
+  const thumbStyle = { width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block", background: "#000" };
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -44,8 +53,8 @@ export default function Card({
         }}
       >
         <div style={{ width: 56, height: 38, borderRadius: 4, overflow: "hidden", background: meta.color + "22", flexShrink: 0, position: "relative" }}>
-          {thumb && !imgFailed
-            ? <img src={thumb} onError={() => setImgFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+          {activeThumb && !imgFailed
+            ? <img src={activeThumb} onError={handleThumbError} style={thumbStyle} alt="" />
             : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: meta.color }}><Icon name="play" size={14} filled /></div>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -77,8 +86,8 @@ export default function Card({
     >
       {/* Thumbnail */}
       <div style={{ width: "100%", aspectRatio: aspect, background: meta.color + "1a", position: "relative", overflow: "hidden" }}>
-        {thumb && !imgFailed ? (
-          <img src={thumb} onError={() => setImgFailed(true)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        {activeThumb && !imgFailed ? (
+          <img src={activeThumb} onError={handleThumbError} alt="" style={thumbStyle} />
         ) : (
           <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: meta.color }}>
             <Icon name="play" size={32} filled />
