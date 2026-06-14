@@ -1,5 +1,6 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { getThumb, getSourceMeta } from "@/lib/sources";
@@ -154,49 +155,79 @@ export default function Card({
 }
 
 function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }) {
+  const buttonRef = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  useLayoutEffect(() => {
+    if (!menuOpen || !buttonRef.current) return;
+    const place = () => {
+      const r = buttonRef.current.getBoundingClientRect();
+      const width = 240;
+      const left = Math.max(10, Math.min(window.innerWidth - width - 10, r.right - width));
+      const top = Math.min(window.innerHeight - 12, r.bottom + 8);
+      setPos({ top, left });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [menuOpen]);
+
+  const menu = menuOpen && typeof document !== "undefined" ? createPortal(
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "fixed", top: pos.top, left: pos.left, zIndex: 10000,
+        background: "rgba(18,18,18,0.98)", border: `1px solid ${T.border}`, backdropFilter: "blur(18px)",
+        borderRadius: 12, boxShadow: "0 18px 60px rgba(0,0,0,0.72)",
+        width: 240, maxHeight: "min(420px, calc(100dvh - 24px))", overflow: "auto", padding: 7,
+      }}
+    >
+      <MenuItem icon="star" label={fav ? "Unfavorite" : "Favorite"} onClick={() => { onToggleFavorite?.(item.key, fav); setMenuOpen(false); }} />
+      <MenuItem icon="check" label="Mark watched" onClick={() => { onMarkWatched?.(item.key); setMenuOpen(false); }} />
+      <div style={{ height: 1, background: T.borderSub, margin: "5px 0" }} />
+      <div style={{ padding: "7px 10px 5px", color: T.text4, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>Rating</div>
+      <div style={{ display: "flex", gap: 2, padding: "0 8px 7px" }}>
+        {[1,2,3,4,5].map((n) => (
+          <button key={n} onClick={() => { onSetRating?.(item.key, rating === n ? null : n); setMenuOpen(false); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 20, lineHeight: 1, padding: 2 }}>★</button>
+        ))}
+      </div>
+      <div style={{ height: 1, background: T.borderSub, margin: "5px 0" }} />
+      <MenuItem icon="folder" label="No folder" onClick={() => { onAssignFolder?.(item.key, null); setMenuOpen(false); }} />
+      {folders.map((f) => (
+        <MenuItem key={f.name} icon="folder" label={f.name} onClick={() => { onAssignFolder?.(item.key, f.name); setMenuOpen(false); }} />
+      ))}
+      <div style={{ height: 1, background: T.borderSub, margin: "5px 0" }} />
+      <MenuItem
+        icon="trash"
+        label="Delete item"
+        danger
+        onClick={() => {
+          const ok = window.confirm("Delete this item from your vault? This will also remove it from the Vault Library sheet mirror when the webhook is configured.");
+          if (!ok) return;
+          onRemoveQuickAdd?.(item.key);
+          setMenuOpen(false);
+        }}
+      />
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
       <button
+        ref={buttonRef}
         onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-        style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.12)", color: T.text1, cursor: "pointer", borderRadius: "50%", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 22px rgba(0,0,0,0.35)" }}
+        style={{ background: menuOpen ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.16)", color: T.text1, cursor: "pointer", borderRadius: "50%", width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 22px rgba(0,0,0,0.35)", position: "relative", zIndex: 5 }}
+        aria-label="Item actions"
       >
         <Icon name="more" size={18} />
       </button>
-      {menuOpen && (
-        <div onClick={(e) => e.stopPropagation()} style={{
-          position: "absolute", top: 42, right: 0, zIndex: 3000,
-          background: "rgba(18,18,18,0.98)", border: `1px solid ${T.border}`, backdropFilter: "blur(18px)",
-          borderRadius: 10, boxShadow: "0 12px 36px rgba(0,0,0,0.6)",
-          minWidth: 210, padding: 6,
-        }}>
-          <MenuItem icon="star" label={fav ? "Unfavorite" : "Favorite"} onClick={() => { onToggleFavorite?.(item.key, fav); setMenuOpen(false); }} />
-          <MenuItem icon="check" label="Mark watched" onClick={() => { onMarkWatched?.(item.key); setMenuOpen(false); }} />
-          <div style={{ height: 1, background: T.borderSub, margin: "4px 0" }} />
-          <div style={{ padding: "7px 10px 5px", color: T.text4, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>Rating</div>
-          <div style={{ display: "flex", gap: 2, padding: "0 8px 6px" }}>
-            {[1,2,3,4,5].map((n) => (
-              <button key={n} onClick={() => { onSetRating?.(item.key, rating === n ? null : n); setMenuOpen(false); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 2 }}>★</button>
-            ))}
-          </div>
-          {folders.length > 0 && <div style={{ height: 1, background: T.borderSub, margin: "4px 0" }} />}
-          <MenuItem icon="folder" label="No folder" onClick={() => { onAssignFolder?.(item.key, null); setMenuOpen(false); }} />
-          {folders.map((f) => (
-            <MenuItem key={f.name} icon="folder" label={f.name} onClick={() => { onAssignFolder?.(item.key, f.name); setMenuOpen(false); }} />
-          ))}
-          <div style={{ height: 1, background: T.borderSub, margin: "4px 0" }} />
-          <MenuItem
-            icon="trash"
-            label="Delete item"
-            danger
-            onClick={() => {
-              const ok = window.confirm("Delete this item from your vault? This will also remove it from the Vault Library sheet mirror when the webhook is configured.");
-              if (!ok) return;
-              onRemoveQuickAdd?.(item.key);
-              setMenuOpen(false);
-            }}
-          />
-        </div>
-      )}
+      {menu}
     </div>
   );
 }

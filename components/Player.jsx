@@ -4,7 +4,7 @@ import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { getEmbed } from "@/lib/sources";
 import { proxiedStreamUrl } from "@/lib/utils";
-import { saveProgress } from "@/lib/supabase";
+import { saveProgress, getItemComments, addItemComment, deleteItemComment } from "@/lib/supabase";
 
 // ─── YouTube IFrame API loader (one-time, page-wide) ─────────────────────────
 let ytApiLoaded = false;
@@ -55,6 +55,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [enhanceMode, setEnhanceMode] = useState("off");
   const [qualityLevels, setQualityLevels] = useState([]);
   const [quality, setQuality] = useState("auto");
+  const [showComments, setShowComments] = useState(false);
 
   // Extraction state (used when source.id === "extract")
   const [extracted, setExtracted] = useState(null); // { url, type, resolution } | null
@@ -544,6 +545,9 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <button onClick={(e) => { e.stopPropagation(); markMoment(); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Mark this timestamp">
           Mark
         </button>
+        <button onClick={(e) => { e.stopPropagation(); setShowComments((v) => !v); }} style={{ ...ctrlBtn, background: showComments ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title="Comments">
+          <Icon name="comment" size={15} />
+        </button>
         {(embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && !useRelay && (
           <button onClick={(e) => { e.stopPropagation(); setRelayReason("Using the secure relay path."); setUseRelay(true); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Use secure relay">
             Relay
@@ -595,6 +599,84 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       )}
 
       <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
+      {showComments && (
+        <CommentsPanel
+          userId={userId}
+          itemKey={item.key}
+          title={item.title || item.url}
+          onClose={() => setShowComments(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function CommentsPanel({ userId, itemKey, title, onClose }) {
+  const [comments, setComments] = useState([]);
+  const [body, setBody] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    if (!userId || !itemKey) return;
+    setLoading(true); setError("");
+    try { setComments(await getItemComments(userId, itemKey)); }
+    catch (e) { setError(e.message || "Could not load comments."); }
+    finally { setLoading(false); }
+  }, [userId, itemKey]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    const text = body.trim();
+    if (!text || !userId) return;
+    setSaving(true); setError("");
+    try {
+      const row = await addItemComment(userId, itemKey, text);
+      if (row) setComments((prev) => [...prev, row]);
+      setBody("");
+    } catch (e) { setError(e.message || "Could not save comment."); }
+    finally { setSaving(false); }
+  };
+
+  const remove = async (id) => {
+    if (!userId) return;
+    const ok = window.confirm("Delete this comment?");
+    if (!ok) return;
+    setComments((prev) => prev.filter((c) => c.id !== id));
+    await deleteItemComment(userId, id).catch(() => {});
+  };
+
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={commentsPanel}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, color: T.text1, fontWeight: 700 }}>Comments</div>
+          <div style={{ fontSize: 11, color: T.text4, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+        </div>
+        <button onClick={onClose} style={miniBtn}><Icon name="x" size={14} /></button>
+      </div>
+
+      {!userId && <div style={commentNotice}>Sign in to save comments.</div>}
+      {error && <div style={{ ...commentNotice, color: "#ff9b9b" }}>{error}</div>}
+
+      <div style={{ display: "grid", gap: 8, maxHeight: "42dvh", overflow: "auto", marginBottom: 12 }}>
+        {loading && <div style={commentNotice}>Loading...</div>}
+        {!loading && comments.length === 0 && <div style={commentNotice}>No comments yet.</div>}
+        {comments.map((c) => (
+          <div key={c.id} style={commentRow}>
+            <div style={{ fontSize: 12, color: T.text2, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{c.body}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 7, gap: 8 }}>
+              <div style={{ fontSize: 10, color: T.text4 }}>{new Date(c.created_at).toLocaleString()}</div>
+              <button onClick={() => remove(c.id)} style={{ ...miniBtn, width: 26, height: 26 }}><Icon name="trash" size={12} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Add a comment..." rows={3} style={commentInput} />
+      <button onClick={add} disabled={!body.trim() || saving || !userId} style={{ ...commentSave, opacity: body.trim() && userId ? 1 : 0.45 }}>{saving ? "Saving..." : "Add comment"}</button>
     </div>
   );
 }
@@ -664,6 +746,78 @@ const selectBtn = {
   padding: "0 10px",
   fontSize: 11,
   backdropFilter: "blur(12px)",
+};
+
+
+const commentsPanel = {
+  position: "absolute",
+  right: 14,
+  bottom: 14,
+  width: "min(380px, calc(100vw - 28px))",
+  maxHeight: "72dvh",
+  background: "rgba(14,14,14,0.96)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 16,
+  padding: 14,
+  zIndex: 1002,
+  boxShadow: "0 24px 80px rgba(0,0,0,0.72)",
+  backdropFilter: "blur(18px)",
+};
+
+const commentRow = {
+  padding: 10,
+  borderRadius: 11,
+  background: "rgba(255,255,255,0.055)",
+  border: "1px solid rgba(255,255,255,0.08)",
+};
+
+const commentNotice = {
+  padding: 10,
+  borderRadius: 10,
+  background: "rgba(255,255,255,0.045)",
+  color: T.text4,
+  fontSize: 12,
+  lineHeight: 1.45,
+};
+
+const commentInput = {
+  width: "100%",
+  resize: "vertical",
+  minHeight: 78,
+  padding: 10,
+  background: "rgba(255,255,255,0.07)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 11,
+  color: T.text1,
+  fontSize: 12,
+  outline: "none",
+  marginBottom: 8,
+};
+
+const commentSave = {
+  width: "100%",
+  padding: "10px 12px",
+  background: "rgba(255,255,255,0.13)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  color: T.text1,
+  borderRadius: 11,
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const miniBtn = {
+  width: 32,
+  height: 32,
+  borderRadius: "50%",
+  background: "rgba(255,255,255,0.075)",
+  border: "1px solid rgba(255,255,255,0.09)",
+  color: T.text2,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
 };
 
 const ctrlBtn = {

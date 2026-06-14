@@ -6,7 +6,7 @@ import ConfigModal from "./ConfigModal";
 import Sidebar from "./Sidebar";
 import BottomNav from "./BottomNav";
 import QuickAddModal from "./QuickAddModal";
-import InAppBrowser from "./InAppBrowser";
+import SheetImportModal from "./SheetImportModal";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { fetchTabData, itemKey, sourceIdOf } from "@/lib/utils";
@@ -53,7 +53,7 @@ export default function Vault() {
   const [showConfig, setShowConfig]     = useState(false);
   const [showSort, setShowSort]         = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
-  const [showBrowser, setShowBrowser] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const [activeItem, setActiveItem]       = useState(null);
   const [activeItemIdx, setActiveItemIdx] = useState(0);
@@ -251,6 +251,48 @@ export default function Vault() {
     }).catch(() => {});
   };
 
+  const handleSheetImport = async (items) => {
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) return { imported: 0, updated: 0, skipped: 0, foldersCreated: 0 };
+    const existingKeys = new Set(quickAdds.map((i) => i.key));
+    const byKey = new Map();
+    list.forEach((item) => {
+      if (!item?.url || !item?.key) return;
+      byKey.set(item.key, { ...item, isVaultItem: true, addedAt: item.addedAt || new Date().toISOString() });
+    });
+    const cleanItems = [...byKey.values()];
+    const folderNames = [...new Set(cleanItems.map((i) => i.folder).filter(Boolean))];
+    const existingFolderNames = new Set(folders.map((f) => f.name));
+    const newFolders = folderNames.filter((name) => !existingFolderNames.has(name));
+
+    if (newFolders.length) {
+      setFolders((prev) => [...prev, ...newFolders.map((name) => ({ name }))].sort((a, b) => a.name.localeCompare(b.name)));
+      if (user) await Promise.all(newFolders.map((name) => createFolder(user.id, name).catch(() => {})));
+    }
+
+    setQuickAdds((prev) => {
+      const imported = new Map(cleanItems.map((i) => [i.key, i]));
+      const kept = prev.filter((i) => !imported.has(i.key));
+      return [...cleanItems, ...kept];
+    });
+
+    if (user) {
+      for (const item of cleanItems) await upsertVaultItem(user.id, item);
+    }
+
+    fetch("/api/sheets-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "bulk_upsert", items: cleanItems }),
+    }).catch(() => {});
+
+    return {
+      imported: cleanItems.filter((i) => !existingKeys.has(i.key)).length,
+      updated: cleanItems.filter((i) => existingKeys.has(i.key)).length,
+      skipped: Math.max(0, list.length - cleanItems.length),
+      foldersCreated: newFolders.length,
+    };
+  };
 
   const handleSetRating = async (key, rating) => {
     const nextRating = rating || null;
@@ -404,19 +446,17 @@ export default function Vault() {
             syncing={syncing} searchOpen={showSearch}
             searchRef={searchRef} search={search} onSearchChange={setSearch}
             onSort={() => setShowSort(!showSort)} sortBy={sortBy}
-            onSync={null}
+            onImport={() => setShowImport(true)}
             onQuickAdd={() => setShowQuickAdd(true)}
-            onBrowser={() => setShowBrowser(true)}
           />
         ) : (
           <DesktopTopBar
             viewTitle={viewTitle} viewItems={viewItems}
             search={search} onSearch={setSearch}
             viewMode={viewMode} onViewMode={handleViewModeChange}
-            onSync={null} syncing={syncing}
+            onImport={() => setShowImport(true)} syncing={syncing}
             sortBy={sortBy} onSortChange={setSortBy}
             onQuickAdd={() => setShowQuickAdd(true)}
-            onBrowser={() => setShowBrowser(true)}
             installPrompt={installPrompt} onInstall={handleInstall}
           />
         )}
@@ -486,7 +526,7 @@ export default function Vault() {
 
       {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} />}
       {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} onCreateFolder={handleCreateFolder} />}
-      {showBrowser && <InAppBrowser onSave={handleQuickAdd} onClose={() => setShowBrowser(false)} folders={folders} isMobile={isMobile} onCreateFolder={handleCreateFolder} />}
+      {showImport && <SheetImportModal onClose={() => setShowImport(false)} onImport={handleSheetImport} existingCount={quickAdds.length} />}
 
       {activeItem && (
         <Player
@@ -516,7 +556,7 @@ export default function Vault() {
 
 // ── Layout pieces ────────────────────────────────────────────────────────────
 
-function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onSync, onQuickAdd, onBrowser }) {
+function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onImport, onQuickAdd }) {
   return (
     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100 }}>
       <button onClick={onMenu} style={iconBtn}><Icon name="menu" size={18} /></button>
@@ -525,15 +565,14 @@ function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef,
         : <div style={{ flex: 1, fontSize: 15, fontWeight: 500, color: T.text1, letterSpacing: -0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
       }
       {onSort && <button onClick={onSort} style={{ ...iconBtn, background: sortBy !== "default" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.06)" }}><Icon name="sort" size={16} /></button>}
-      {onBrowser && <button onClick={onBrowser} style={iconBtn} title="Browser"><Icon name="search" size={16} /></button>}
+      {onImport && <button onClick={onImport} style={iconBtn} title="Import Sheet"><Icon name="import" size={16} /></button>}
       {onQuickAdd && <button onClick={onQuickAdd} style={iconBtn} title="Add video"><Icon name="addCircle" size={16} /></button>}
-      {onSync && <button onClick={onSync} disabled={syncing} style={iconBtn} title="Sync"><Icon name="sync" size={16} style={{ animation: syncing ? "spin 0.8s linear infinite" : "none" }} /></button>}
       <button onClick={onSearch} style={iconBtn}><Icon name="search" size={16} /></button>
     </div>
   );
 }
 
-function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onSync, syncing, sortBy, onSortChange, onQuickAdd, onBrowser, installPrompt, onInstall }) {
+function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall }) {
   const [showSortDrop, setShowSortDrop] = useState(false);
   return (
     <div style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100, gap: 12, flexWrap: "wrap" }}>
@@ -564,10 +603,10 @@ function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onVie
             </button>
           ))}
         </div>
-        <button onClick={onBrowser} style={{ ...iconBtn, borderRadius: 7 }} title="Browser"><Icon name="search" size={16} /></button>
+        <button onClick={onImport} style={{ ...iconBtn, borderRadius: 7 }} title="Import Sheet"><Icon name="import" size={16} /></button>
         <button onClick={onQuickAdd} style={{ ...iconBtn, borderRadius: 7 }} title="Add video"><Icon name="addCircle" size={16} /></button>
         {installPrompt && <button onClick={onInstall} style={{ ...iconBtn, borderRadius: 7 }} title="Install app"><Icon name="download" size={15} /></button>}
-        {onSync && <button onClick={onSync} disabled={syncing} style={iconBtn}><Icon name="sync" size={14} style={{ animation: syncing ? "spin 0.8s linear infinite" : "none" }} /></button>}
+
       </div>
     </div>
   );

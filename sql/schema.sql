@@ -59,6 +59,17 @@ create table if not exists vault_moment_marks (
   created_at  timestamptz default now()
 );
 
+
+-- Per-item comments. Private to each user. Useful for notes after watching/reviewing.
+create table if not exists vault_comments (
+  id          uuid default gen_random_uuid() primary key,
+  user_id     uuid references auth.users on delete cascade not null,
+  item_key    text not null,
+  body        text not null,
+  created_at  timestamptz default now(),
+  updated_at  timestamptz default now()
+);
+
 -- Per-user settings: sheet webhook/mirror config + view prefs.
 create table if not exists user_settings (
   user_id     uuid references auth.users on delete cascade primary key,
@@ -82,6 +93,7 @@ alter table vault_items        enable row level security;
 alter table user_data          enable row level security;
 alter table vault_folders      enable row level security;
 alter table vault_moment_marks enable row level security;
+alter table vault_comments    enable row level security;
 alter table user_settings      enable row level security;
 alter table vault_quick_adds   enable row level security;
 
@@ -98,6 +110,9 @@ do $$ begin
   create policy "own moment_marks" on vault_moment_marks for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
 do $$ begin
+  create policy "own vault_comments" on vault_comments for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
   create policy "own user_settings" on user_settings for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
 do $$ begin
@@ -110,4 +125,5 @@ create index if not exists idx_vault_items_folder      on vault_items(user_id, f
 create index if not exists idx_user_data_user          on user_data(user_id);
 create index if not exists idx_user_data_key           on user_data(user_id, item_key);
 create index if not exists idx_moment_marks_user_key   on vault_moment_marks(user_id, item_key);
+create index if not exists idx_vault_comments_user_key on vault_comments(user_id, item_key);
 create index if not exists idx_vault_quick_adds_user   on vault_quick_adds(user_id);
