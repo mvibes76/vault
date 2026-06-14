@@ -98,3 +98,9 @@ Run `sql/schema.sql` after updating to v22 so Supabase creates `vault_covers` an
 ## v23 Cover Controls
 
 Run `sql/schema.sql` after deploying. v23 adds per-item cover behavior, crop/sizing controls, Sheet cover import fields, and Cover Library crop controls.
+
+## v24 Gallery Experience
+
+Folders can now act as galleries. A gallery can have its own cover, note, display mode, and recently viewed state. The Everything view can show organized gallery cards or a flat wall of all media. Folder views include media filters and a slideshow mode.
+
+Run `sql/schema.sql` after deploying v24.
