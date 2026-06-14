@@ -53,3 +53,8 @@ npm run dev
 ## v17
 
 Adds folder deletion, better scrollable menus, exact-case Sheet folder import, restored player controls, timestamp mark confirmation, and less aggressive relay fallback.
+
+
+## v18 folder behavior
+
+Folder identity is case-insensitive. Existing folder casing wins. If `Main` exists, imported `main` goes into `Main` instead of creating a second folder.

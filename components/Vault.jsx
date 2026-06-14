@@ -194,13 +194,22 @@ export default function Vault() {
   // ── Aggregated items ──────────────────────────────────────────────────────
   const allItems = useMemo(() => quickAdds, [quickAdds]);
 
+  const canonicalFolderName = useCallback((name, folderList = folders) => {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) return null;
+    const match = folderList.find((f) => String(f.name || "").trim().toLowerCase() === trimmed.toLowerCase());
+    return match?.name || trimmed;
+  }, [folders]);
+
+  const folderEquals = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
   // ── User actions ──────────────────────────────────────────────────────────
   const handleToggleFavorite = async (key, current) => {
     setUserData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), item_key: key, favorite: !current } }));
     if (user) await toggleFavorite(user.id, key, current);
   };
   const handleAssignFolder = async (key, folder) => {
-    const normalized = folder || null;
+    const normalized = canonicalFolderName(folder);
     setUserData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), item_key: key, folder: normalized } }));
     setQuickAdds((prev) => prev.map((i) => i.key === key ? { ...i, folder: normalized } : i));
     if (user) {
@@ -215,21 +224,26 @@ export default function Vault() {
     }
   };
   const handleCreateFolder = async (name) => {
-    if (folders.some((f) => f.name === name)) return;
-    setFolders((prev) => [...prev, { name }].sort((a, b) => a.name.localeCompare(b.name)));
-    if (user) await createFolder(user.id, name);
+    const cleaned = String(name || "").trim();
+    if (!cleaned) return null;
+    const existing = folders.find((f) => folderEquals(f.name, cleaned));
+    if (existing) return existing.name;
+    setFolders((prev) => [...prev, { name: cleaned }].sort((a, b) => a.name.localeCompare(b.name)));
+    if (user) await createFolder(user.id, cleaned);
+    return cleaned;
   };
   const handleDeleteFolder = async (name) => {
-    const affectedItems = quickAdds.filter((i) => i.folder === name).map((i) => ({ ...i, folder: null }));
-    setFolders((prev) => prev.filter((f) => f.name !== name));
-    setQuickAdds((prev) => prev.map((i) => i.folder === name ? { ...i, folder: null } : i));
+    const canonical = canonicalFolderName(name);
+    const affectedItems = quickAdds.filter((i) => folderEquals(i.folder, canonical)).map((i) => ({ ...i, folder: null }));
+    setFolders((prev) => prev.filter((f) => !folderEquals(f.name, canonical)));
+    setQuickAdds((prev) => prev.map((i) => folderEquals(i.folder, canonical) ? { ...i, folder: null } : i));
     setUserData((prev) => {
       const next = { ...prev };
-      Object.keys(next).forEach((k) => { if (next[k].folder === name) next[k] = { ...next[k], folder: null }; });
+      Object.keys(next).forEach((k) => { if (folderEquals(next[k].folder, canonical)) next[k] = { ...next[k], folder: null }; });
       return next;
     });
-    if (activeView === `folder:${name}`) setActiveView("all");
-    if (user) await deleteFolder(user.id, name);
+    if (activeView === `folder:${canonical}`) setActiveView("all");
+    if (user) await deleteFolder(user.id, canonical);
     if (affectedItems.length) {
       fetch("/api/sheets-sync", {
         method: "POST",
@@ -242,12 +256,13 @@ export default function Vault() {
   const handleSignOut = async () => { if (supabase) await supabase.auth.signOut(); window.location.reload(); };
 
   const handleQuickAdd = async (item) => {
-    setQuickAdds((prev) => [item, ...prev.filter((i) => i.url !== item.url)]);
-    if (user) await upsertVaultItem(user.id, item);
+    const normalizedItem = { ...item, folder: canonicalFolderName(item.folder) };
+    setQuickAdds((prev) => [normalizedItem, ...prev.filter((i) => i.url !== normalizedItem.url)]);
+    if (user) await upsertVaultItem(user.id, normalizedItem);
     fetch("/api/sheets-sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "upsert", ...item }),
+      body: JSON.stringify({ action: "upsert", ...normalizedItem }),
     }).catch(() => {});
   };
   const handleRemoveQuickAdd = async (key) => {
@@ -269,12 +284,23 @@ export default function Vault() {
       if (!item?.url || !item?.key) return;
       byKey.set(item.key, { ...item, isVaultItem: true, addedAt: item.addedAt || new Date().toISOString() });
     });
-    const cleanItems = [...byKey.values()];
-    // Folder names are intentionally case-sensitive. If the sheet says "videos",
-    // the app keeps "videos" instead of forcing it into an existing "Videos" folder.
+
+    // Folder identity is case-insensitive, but display casing is preserved from the
+    // first existing folder. Example: if "Main" exists, imported "main" maps to "Main".
+    // If no match exists, the imported spelling becomes the folder display name.
+    const existingByLower = new Map(folders.map((f) => [String(f.name || "").trim().toLowerCase(), f.name]));
+    const newFolderByLower = new Map();
+    const cleanItems = [...byKey.values()].map((item) => {
+      const rawFolder = String(item.folder || "").trim();
+      if (!rawFolder) return { ...item, folder: null };
+      const lower = rawFolder.toLowerCase();
+      const resolved = existingByLower.get(lower) || newFolderByLower.get(lower) || rawFolder;
+      if (!existingByLower.has(lower)) newFolderByLower.set(lower, resolved);
+      return { ...item, folder: resolved };
+    });
     const folderNames = [...new Set(cleanItems.map((i) => i.folder).filter(Boolean))];
-    const existingFolderNames = new Set(folders.map((f) => f.name));
-    const newFolders = folderNames.filter((name) => !existingFolderNames.has(name));
+    const existingFolderNamesLower = new Set(folders.map((f) => String(f.name || "").trim().toLowerCase()));
+    const newFolders = folderNames.filter((name) => !existingFolderNamesLower.has(String(name || "").trim().toLowerCase()));
 
     if (newFolders.length) {
       setFolders((prev) => [...prev, ...newFolders.map((name) => ({ name }))].sort((a, b) => a.name.localeCompare(b.name)));
