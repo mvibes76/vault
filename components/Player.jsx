@@ -978,7 +978,7 @@ function ImageViewer({ src, alt }) {
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "fixed", inset: 0, width: "100vw", height: "100dvh" }}>
       <div
         onWheel={onWheel}
         onTouchStart={onTouchStart}
@@ -990,12 +990,13 @@ function ImageViewer({ src, alt }) {
         onMouseLeave={onMouseUp}
         onDoubleClick={onDoubleClick}
         style={{
-          maxWidth: "94vw", maxHeight: "90vh",
+          width: "100vw", height: "100dvh",
           overflow: "hidden",
+          display: "flex", alignItems: "center", justifyContent: "center",
           cursor: scale > 1 ? (dragState.current ? "grabbing" : "grab") : "zoom-in",
           userSelect: "none",
           touchAction: "none",
-          borderRadius: 8,
+          background: "#000",
         }}
       >
         <img
@@ -1003,7 +1004,7 @@ function ImageViewer({ src, alt }) {
           alt={alt}
           draggable={false}
           style={{
-            maxWidth: "94vw", maxHeight: "90vh",
+            width: "100vw", height: "100dvh",
             objectFit: "contain", display: "block",
             transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
             transformOrigin: "center",

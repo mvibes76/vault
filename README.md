@@ -58,3 +58,15 @@ Adds folder deletion, better scrollable menus, exact-case Sheet folder import, r
 ## v18 folder behavior
 
 Folder identity is case-insensitive. Existing folder casing wins. If `Main` exists, imported `main` goes into `Main` instead of creating a second folder.
+
+
+## v19
+
+- Dashboard home screen.
+- Full-screen image viewer fix.
+- View tracking stats.
+- Portrait-first cards.
+- Sheet Thumbnail column support.
+- Drag cards to folders on desktop.
+
+Run `sql/schema.sql` again after deploying v19.

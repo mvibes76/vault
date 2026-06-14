@@ -15,7 +15,7 @@ import {
   supabase, isSupabaseConfigured, getUserData, toggleFavorite,
   setItemFolder, getFolders, createFolder, deleteFolder,
   getSettings, saveSettings, saveProgress,
-  getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark,
+  getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark, recordItemView,
 } from "@/lib/supabase";
 
 const VIEW_MODES = [
@@ -38,7 +38,7 @@ export default function Vault() {
   const [sheetId, setSheetId]         = useState("");
   const [manualTabs, setManualTabs]   = useState(null);
   const [tabs, setTabs]               = useState([]);
-  const [activeView, setActiveView]   = useState("all");
+  const [activeView, setActiveView]   = useState("home");
   const [loading, setLoading]         = useState(false);
   const [syncing, setSyncing]         = useState(false);
   const [error, setError]             = useState("");
@@ -386,11 +386,27 @@ export default function Vault() {
     return items;
   }, [allItems, activeView, sourceFilter, search, userData, sortItems]);
 
-  // ── Open item ─────────────────────────────────────────────────────────────
+  // ── Open item + view tracking ─────────────────────────────────────────────
   const openItem = useCallback((item) => {
+    const now = new Date().toISOString();
+    setUserData((prev) => {
+      const current = prev[item.key] || {};
+      return {
+        ...prev,
+        [item.key]: {
+          ...current,
+          item_key: item.key,
+          view_count: Number(current.view_count || 0) + 1,
+          first_viewed_at: current.first_viewed_at || now,
+          last_viewed_at: now,
+          updated_at: now,
+        },
+      };
+    });
+    if (user) recordItemView(user.id, item.key).catch(() => {});
     setActiveItem(item);
     setActiveItemIdx(Math.max(0, viewItems.findIndex((i) => i.key === item.key)));
-  }, [viewItems]);
+  }, [viewItems, user]);
 
   // ── Counts ────────────────────────────────────────────────────────────────
   const counts = {
@@ -433,6 +449,7 @@ export default function Vault() {
   };
 
   const viewTitle =
+    activeView === "home"           ? "Home"           :
     activeView === "all"            ? "Everything"     :
     activeView === "favorites"      ? "Favorites"      :
     activeView === "continue"       ? "Continue"       :
@@ -449,6 +466,22 @@ export default function Vault() {
 
   const bottomPad = isMobile ? 78 : 0;
 
+  const recentlyViewed = useMemo(() => [...allItems]
+    .filter((i) => userData[i.key]?.last_viewed_at)
+    .sort((a, b) => new Date(userData[b.key]?.last_viewed_at || 0) - new Date(userData[a.key]?.last_viewed_at || 0))
+    .slice(0, 8), [allItems, userData]);
+  const continueItems = useMemo(() => allItems
+    .filter((i) => { const d = userData[i.key]; return d?.progress > 5 && d?.duration > 0 && d.progress / d.duration < 0.95; })
+    .slice(0, 8), [allItems, userData]);
+  const topRatedItems = useMemo(() => [...allItems]
+    .filter((i) => userData[i.key]?.rating)
+    .sort((a, b) => (userData[b.key]?.rating || 0) - (userData[a.key]?.rating || 0))
+    .slice(0, 8), [allItems, userData]);
+  const recentlyAdded = useMemo(() => [...allItems]
+    .sort((a, b) => new Date(b.addedAt || b.updatedAt || 0) - new Date(a.addedAt || a.updatedAt || 0))
+    .slice(0, 8), [allItems]);
+  const totalViews = useMemo(() => allItems.reduce((sum, i) => sum + Number(userData[i.key]?.view_count || 0), 0), [allItems, userData]);
+
   const cardProps = {
     userData,
     onToggleFavorite: handleToggleFavorite,
@@ -458,6 +491,7 @@ export default function Vault() {
     onRemoveQuickAdd: handleRemoveQuickAdd,
     onMarkWatched: handleMarkWatched,
     onSetRating: handleSetRating,
+    onDragItem: () => {},
   };
 
   return (
@@ -466,7 +500,7 @@ export default function Vault() {
       <Sidebar
         tabs={[]}
         activeView={activeView} onNavigate={navigate}
-        folders={folders} onCreateFolder={handleCreateFolder} onDeleteFolder={handleDeleteFolder}
+        folders={folders} onCreateFolder={handleCreateFolder} onDeleteFolder={handleDeleteFolder} onDropItemToFolder={handleAssignFolder}
         counts={counts}
         onSignOut={isSupabaseConfigured() ? handleSignOut : null} userEmail={user?.email}
         collapsed={isMobile ? false : sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -524,7 +558,25 @@ export default function Vault() {
         )}
 
         <div style={{ padding: isMobile ? 12 : 24, flex: 1 }}>
-          {!sheetId && !loading && !quickAdds.length && (
+          {!loading && activeView === "home" && (
+            <Dashboard
+              isMobile={isMobile}
+              allItems={allItems}
+              folders={folders}
+              totalViews={totalViews}
+              continueItems={continueItems}
+              recentlyViewed={recentlyViewed}
+              recentlyAdded={recentlyAdded}
+              topRatedItems={topRatedItems}
+              userData={userData}
+              onOpen={openItem}
+              onNavigate={navigate}
+              onQuickAdd={() => setShowQuickAdd(true)}
+              onImport={() => setShowImport(true)}
+              cardProps={cardProps}
+            />
+          )}
+          {activeView !== "home" && !sheetId && !loading && !quickAdds.length && (
             <EmptyState
               icon="inbox"
               title="Empty vault"
@@ -535,11 +587,11 @@ export default function Vault() {
           )}
           {loading && <Spinner />}
           {error && !loading && <ErrorBox msg={error} />}
-          {!loading && viewItems.length === 0 && !error && (sheetId || quickAdds.length) && (
+          {activeView !== "home" && !loading && viewItems.length === 0 && !error && (sheetId || quickAdds.length) && (
             <EmptyState icon="inbox" title="Nothing here" sub={search ? `No results for "${search}"` : "No items in this view."} />
           )}
 
-          {!loading && viewItems.length > 0 && viewMode !== "list" && (
+          {activeView !== "home" && !loading && viewItems.length > 0 && viewMode !== "list" && (
             <div style={gridStyle}>
               {viewItems.map((item) => (
                 <Card key={item.id || item.key} item={item} onOpen={openItem}
@@ -549,7 +601,7 @@ export default function Vault() {
             </div>
           )}
 
-          {!loading && viewItems.length > 0 && viewMode === "list" && (
+          {activeView !== "home" && !loading && viewItems.length > 0 && viewMode === "list" && (
             <div style={{ border: `1px solid ${T.border}`, borderRadius: T.r10, overflow: "hidden" }}>
               {viewItems.map((item) => (
                 <Card key={item.id || item.key} item={item} onOpen={openItem} viewMode="list" {...cardProps} />
@@ -590,6 +642,70 @@ export default function Vault() {
     </div>
   );
 }
+
+
+function Dashboard({ isMobile, allItems, folders, totalViews, continueItems, recentlyViewed, recentlyAdded, topRatedItems, userData, onOpen, onNavigate, onQuickAdd, onImport, cardProps }) {
+  const cardMode = isMobile ? "grid" : "grid";
+  const statCards = [
+    { label: "Saved", value: allItems.length, accent: "rgba(255,255,255,0.20)" },
+    { label: "Folders", value: folders.length, accent: "rgba(125,180,255,0.50)" },
+    { label: "Views", value: totalViews, accent: "rgba(80,220,120,0.55)" },
+    { label: "Rated", value: topRatedItems.length, accent: "rgba(255,204,92,0.60)" },
+  ];
+  return (
+    <div style={{ display: "grid", gap: isMobile ? 16 : 22 }}>
+      <div style={{
+        border: `1px solid ${T.border}`, borderRadius: 22, padding: isMobile ? 18 : 24,
+        background: "radial-gradient(circle at top left, rgba(255,255,255,0.12), transparent 34%), linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025))",
+        boxShadow: "0 24px 70px rgba(0,0,0,0.28)", overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: isMobile ? "flex-start" : "center", flexDirection: isMobile ? "column" : "row" }}>
+          <div>
+            <div style={{ fontSize: isMobile ? 24 : 32, lineHeight: 1.05, fontWeight: 800, letterSpacing: -1.2, color: T.text1 }}>Welcome back</div>
+            <div style={{ marginTop: 8, fontSize: 13, color: T.text4 }}>Continue watching, import from Sheets, or save the next reference.</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={onQuickAdd} style={dashPrimary}>Add to Vault</button>
+            <button onClick={onImport} style={dashSecondary}>Import Sheet</button>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(4,minmax(0,1fr))", gap: 10, marginTop: 18 }}>
+          {statCards.map((s) => <button key={s.label} onClick={() => s.label === "Folders" ? onNavigate("all") : null} style={{ textAlign: "left", border: `1px solid ${T.borderSub}`, borderRadius: 16, padding: 14, background: "rgba(0,0,0,0.22)", color: T.text1 }}>
+            <div style={{ width: 26, height: 3, borderRadius: 99, background: s.accent, marginBottom: 12 }} />
+            <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.8 }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: T.text4, marginTop: 3 }}>{s.label}</div>
+          </button>)}
+        </div>
+      </div>
+
+      <DashboardRow title="Continue Watching" empty="No active videos yet." items={continueItems} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("continue")} />
+      <DashboardRow title="Last Watched" empty="Open an item and it will show here." items={recentlyViewed} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
+      <DashboardRow title="Top Rated" empty="Rate items to build this row." items={topRatedItems} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("rated")} />
+      <DashboardRow title="Recently Added" empty="Your newest saves appear here." items={recentlyAdded} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
+    </div>
+  );
+}
+
+function DashboardRow({ title, empty, items, onOpen, cardProps, cardMode, onSeeAll }) {
+  return (
+    <section>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+        <h2 style={{ margin: 0, fontSize: 15, color: T.text1, letterSpacing: -0.2 }}>{title}</h2>
+        {onSeeAll && <button onClick={onSeeAll} style={{ background: "transparent", border: "none", color: T.text4, fontSize: 12, cursor: "pointer" }}>See all</button>}
+      </div>
+      {items.length ? (
+        <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(150px, 210px)", gap: 12, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
+          {items.map((item) => <Card key={item.id || item.key} item={item} onOpen={onOpen} viewMode={cardMode} {...cardProps} />)}
+        </div>
+      ) : (
+        <div style={{ border: `1px dashed ${T.border}`, borderRadius: 14, padding: "18px 14px", color: T.text4, fontSize: 12, background: "rgba(255,255,255,0.025)" }}>{empty}</div>
+      )}
+    </section>
+  );
+}
+
+const dashPrimary = { padding: "10px 15px", borderRadius: 12, background: "#fff", color: "#000", border: "none", fontSize: 13, fontWeight: 800, cursor: "pointer" };
+const dashSecondary = { padding: "10px 15px", borderRadius: 12, background: "rgba(255,255,255,0.08)", color: T.text1, border: `1px solid ${T.border}`, fontSize: 13, fontWeight: 700, cursor: "pointer" };
 
 // ── Layout pieces ────────────────────────────────────────────────────────────
 

@@ -127,3 +127,12 @@ create index if not exists idx_user_data_key           on user_data(user_id, ite
 create index if not exists idx_moment_marks_user_key   on vault_moment_marks(user_id, item_key);
 create index if not exists idx_vault_comments_user_key on vault_comments(user_id, item_key);
 create index if not exists idx_vault_quick_adds_user   on vault_quick_adds(user_id);
+
+-- v19: dashboard and view tracking stats. Safe to rerun.
+alter table user_data add column if not exists view_count int default 0;
+alter table user_data add column if not exists first_viewed_at timestamptz;
+alter table user_data add column if not exists last_viewed_at timestamptz;
+alter table user_data add column if not exists completed_count int default 0;
+alter table user_data add column if not exists watch_seconds real default 0;
+create index if not exists idx_user_data_last_viewed on user_data(user_id, last_viewed_at);
+create index if not exists idx_user_data_view_count on user_data(user_id, view_count);

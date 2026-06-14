@@ -9,10 +9,10 @@ export default function Card({
   item, onOpen, viewMode = "grid",
   userData, onToggleFavorite, folders = [], onAssignFolder,
   isMobile, onRemoveQuickAdd, onMarkWatched, onSetRating,
-  onSelect, selected,
+  onSelect, selected, onDragItem,
 }) {
   const meta  = getSourceMeta(item.url);
-  const thumb = getThumb(item.url);
+  const thumb = item.thumbnail || getThumb(item.url);
   const u     = userData?.[item.key] || {};
   const fav   = !!u.favorite;
   const progress = u.progress > 0 && u.duration > 0 ? Math.min(1, u.progress / u.duration) : 0;
@@ -58,11 +58,13 @@ export default function Card({
   }
 
   // ── Card views (showcase / grid / compact) ────────────────────────────
-  const aspect = viewMode === "compact" ? "1 / 1" : "16 / 10";
+  const aspect = viewMode === "compact" ? "1 / 1" : "4 / 5";
 
   return (
     <div
       onClick={() => (onSelect ? onSelect(item) : onOpen(item))}
+      draggable={!!onDragItem}
+      onDragStart={(e) => { e.dataTransfer.setData("text/plain", item.key); e.dataTransfer.effectAllowed = "move"; onDragItem?.(item); }}
       style={{
         position: "relative",
         background: T.bgCard,

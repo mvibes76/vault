@@ -47,7 +47,7 @@ function SectionLabel({ collapsed, children }) {
 export default function Sidebar({
   tabs, activeView, onNavigate, folders, onCreateFolder, onDeleteFolder,
   counts, onSignOut, userEmail, collapsed, onToggleCollapse,
-  mobile = false, open = true, onClose,
+  mobile = false, open = true, onClose, onDropItemToFolder,
 }) {
   const [newFolder, setNewFolder] = useState("");
   const [adding, setAdding] = useState(false);
@@ -90,7 +90,8 @@ export default function Sidebar({
         </div>
 
         {/* Library */}
-        <NavItem {...np} id="all" icon="home" label="Everything" count={counts.all} />
+        <NavItem {...np} id="home" icon="home" label="Home" />
+        <NavItem {...np} id="all" icon="vault" label="Everything" count={counts.all} />
         <NavItem {...np} id="favorites" icon="star" label="Favorites" count={counts.favorites} />
         <NavItem {...np} id="continue" icon="clock" label="Continue" count={counts.continue} />
         <NavItem {...np} id="rated" icon="star" label="Rated" count={counts.rated} />
@@ -108,7 +109,13 @@ export default function Sidebar({
         {/* Folders */}
         <SectionLabel collapsed={collapsed}>Folders</SectionLabel>
         {folders.map((f) => (
-          <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 4, width: "100%" }}>
+          <div
+            key={f.name}
+            onDragOver={(e) => { if (onDropItemToFolder) { e.preventDefault(); e.currentTarget.style.background = "rgba(255,255,255,0.07)"; } }}
+            onDragLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            onDrop={(e) => { e.preventDefault(); e.currentTarget.style.background = "transparent"; const key = e.dataTransfer.getData("text/plain"); if (key) onDropItemToFolder?.(key, f.name); }}
+            style={{ display: "flex", alignItems: "center", gap: 4, width: "100%", borderRadius: T.r6 }}
+          >
             <div style={{ flex: 1, minWidth: 0 }}>
               <NavItem {...np} id={`folder:${f.name}`} icon="folder" label={f.name} count={counts[`folder:${f.name}`]} />
             </div>
