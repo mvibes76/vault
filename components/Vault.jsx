@@ -220,7 +220,9 @@ export default function Vault() {
     if (user) await createFolder(user.id, name);
   };
   const handleDeleteFolder = async (name) => {
+    const affectedItems = quickAdds.filter((i) => i.folder === name).map((i) => ({ ...i, folder: null }));
     setFolders((prev) => prev.filter((f) => f.name !== name));
+    setQuickAdds((prev) => prev.map((i) => i.folder === name ? { ...i, folder: null } : i));
     setUserData((prev) => {
       const next = { ...prev };
       Object.keys(next).forEach((k) => { if (next[k].folder === name) next[k] = { ...next[k], folder: null }; });
@@ -228,6 +230,13 @@ export default function Vault() {
     });
     if (activeView === `folder:${name}`) setActiveView("all");
     if (user) await deleteFolder(user.id, name);
+    if (affectedItems.length) {
+      fetch("/api/sheets-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk_upsert", items: affectedItems }),
+      }).catch(() => {});
+    }
   };
   const handleViewModeChange = (mode) => { setViewMode(mode); if (user) saveSettings(user.id, { view_mode: mode }); };
   const handleSignOut = async () => { if (supabase) await supabase.auth.signOut(); window.location.reload(); };
@@ -261,6 +270,8 @@ export default function Vault() {
       byKey.set(item.key, { ...item, isVaultItem: true, addedAt: item.addedAt || new Date().toISOString() });
     });
     const cleanItems = [...byKey.values()];
+    // Folder names are intentionally case-sensitive. If the sheet says "videos",
+    // the app keeps "videos" instead of forcing it into an existing "Videos" folder.
     const folderNames = [...new Set(cleanItems.map((i) => i.folder).filter(Boolean))];
     const existingFolderNames = new Set(folders.map((f) => f.name));
     const newFolders = folderNames.filter((name) => !existingFolderNames.has(name));

@@ -108,7 +108,30 @@ export default function Sidebar({
         {/* Folders */}
         <SectionLabel collapsed={collapsed}>Folders</SectionLabel>
         {folders.map((f) => (
-          <NavItem key={f.name} {...np} id={`folder:${f.name}`} icon="folder" label={f.name} count={counts[`folder:${f.name}`]} />
+          <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 4, width: "100%" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <NavItem {...np} id={`folder:${f.name}`} icon="folder" label={f.name} count={counts[`folder:${f.name}`]} />
+            </div>
+            {!collapsed && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const ok = window.confirm(`Delete folder "${f.name}"? Items stay in your vault and move to No folder.`);
+                  if (ok) onDeleteFolder?.(f.name);
+                }}
+                title={`Delete ${f.name}`}
+                style={{
+                  width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "transparent", border: "none", color: T.text4, cursor: "pointer",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,80,80,0.10)"; e.currentTarget.style.color = "#ff8f8f"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text4; }}
+              >
+                <Icon name="trash" size={12} />
+              </button>
+            )}
+          </div>
         ))}
         {!collapsed && (
           adding ? (

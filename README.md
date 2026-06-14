@@ -48,3 +48,8 @@ npm run dev
 ## Build verified
 
 `npm run build` passed in the package workspace.
+
+
+## v17
+
+Adds folder deletion, better scrollable menus, exact-case Sheet folder import, restored player controls, timestamp mark confirmation, and less aggressive relay fallback.

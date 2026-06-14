@@ -28,7 +28,7 @@ export async function GET(request) {
   try {
     const upstream = await safeFetch(checked.url.href, {
       headers,
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(45000),
     });
 
     if (!upstream.ok && upstream.status !== 206) {

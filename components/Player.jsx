@@ -56,6 +56,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [qualityLevels, setQualityLevels] = useState([]);
   const [quality, setQuality] = useState("auto");
   const [showComments, setShowComments] = useState(false);
+  const [markNotice, setMarkNotice] = useState("");
 
   // Extraction state (used when source.id === "extract")
   const [extracted, setExtracted] = useState(null); // { url, type, resolution } | null
@@ -63,12 +64,18 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [extracting, setExtracting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const refreshCount = useRef(0); // bail after too many auto-refresh attempts
+  const hlsRecoverCount = useRef(0); // recover once before falling back to relay
+  const markNoticeTimer = useRef(null);
   const seekTarget = useRef(0);   // where to resume after a refresh
 
   // Reset relay mode when changing items. Direct playback is always tried first.
   useEffect(() => {
     setUseRelay(false);
     setRelayReason("");
+    setQualityLevels([]);
+    setQuality("auto");
+    hlsRecoverCount.current = 0;
+    setMarkNotice("");
   }, [item.url]);
 
   // Set Twitch parent param from current hostname (required by Twitch embeds)
@@ -228,6 +235,8 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
   }, [hasNext, hasPrev, currentIdx, onNavigate, handleClose]);
 
+  useEffect(() => () => { if (markNoticeTimer.current) clearTimeout(markNoticeTimer.current); }, []);
+
   // ── YouTube IFrame setup + progress save on unmount ─────────────────────
   useEffect(() => {
     if (embed?.kind !== "youtube-api") return;
@@ -292,7 +301,13 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       const Hls = (await import("hls.js")).default;
       if (destroyed) return;
       if (Hls.isSupported()) {
-        const hls = new Hls();
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 30,
+          maxBufferLength: 45,
+          maxMaxBufferLength: 90,
+        });
         hlsRef.current = hls;
         hls.loadSource(mediaSrc);
         hls.attachMedia(v);
@@ -305,7 +320,13 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         // Hand fatal errors (mostly expired-token segment 403s) to the
         // same refresh path the <video> element uses for direct MP4s.
         hls.on(Hls.Events.ERROR, (_evt, data) => {
-          if (data?.fatal) handleVideoError();
+          if (!data?.fatal) return;
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsRecoverCount.current < 1) {
+            hlsRecoverCount.current += 1;
+            hls.recoverMediaError();
+            return;
+          }
+          handleVideoError();
         });
       }
     })();
@@ -390,6 +411,11 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     const seconds = videoRef.current?.currentTime || ytPlayer.current?.getCurrentTime?.() || 0;
     onAddMoment?.({ seconds, rating: markRating });
     onRate?.(markRating);
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
+    setMarkNotice(`Marked ${mins}:${secs} · ★ ${markRating}`);
+    if (markNoticeTimer.current) clearTimeout(markNoticeTimer.current);
+    markNoticeTimer.current = setTimeout(() => setMarkNotice(""), 1800);
   };
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -473,7 +499,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           <video
             ref={videoRef}
             src={mediaSrc}
-            controls autoPlay playsInline
+            controls autoPlay playsInline preload="metadata"
             muted={muted}
             onTimeUpdate={onTimeUpdate}
             onError={handleVideoError}
@@ -491,7 +517,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <div style={mediaShell(isFullscreen)}>
           <video
             ref={videoRef}
-            controls autoPlay playsInline
+            controls autoPlay playsInline preload="metadata"
             muted={muted}
             onTimeUpdate={onTimeUpdate}
             onError={handleVideoError}
@@ -524,7 +550,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       }}
     >
       {/* Top controls */}
-      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 1001, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "92vw" }}>
+      <div style={topControls}>
         {(embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api") && (
           <select value={enhanceMode} onChange={(e) => { e.stopPropagation(); setEnhanceMode(e.target.value); }} onClick={(e) => e.stopPropagation()} style={selectBtn} title="View enhancement">
             <option value="off">Enhance Off</option>
@@ -543,7 +569,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           {[1,2,3,4,5].map((n) => <button key={n} onClick={(e) => { e.stopPropagation(); onRate?.(rating === n ? null : n); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 16, padding: 1 }}>★</button>)}
         </div>
         <button onClick={(e) => { e.stopPropagation(); markMoment(); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Mark this timestamp">
-          Mark
+          Mark ★{rating || 5}
         </button>
         <button onClick={(e) => { e.stopPropagation(); setShowComments((v) => !v); }} style={{ ...ctrlBtn, background: showComments ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title="Comments">
           <Icon name="comment" size={15} />
@@ -578,6 +604,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         </a>
         <button onClick={handleClose} style={ctrlBtn} title="Close"><Icon name="x" size={15} /></button>
       </div>
+      {markNotice && <div style={markToast}>{markNotice}</div>}
 
       {/* Title chip (bottom) */}
       {item.title && (
@@ -684,6 +711,20 @@ function CommentsPanel({ userId, itemKey, title, onClose }) {
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const fullscreenStage = { width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#000" };
+
+const topControls = {
+  position: "absolute", top: 16, left: 16, right: 16, zIndex: 1001,
+  display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end",
+  maxWidth: "calc(100vw - 32px)", overflowX: "auto", overflowY: "hidden",
+  paddingBottom: 5, WebkitOverflowScrolling: "touch", scrollbarWidth: "thin",
+};
+
+const markToast = {
+  position: "absolute", top: 66, right: 16, zIndex: 1002,
+  padding: "7px 11px", borderRadius: 999, background: "rgba(0,0,0,0.72)",
+  border: "1px solid rgba(255,255,255,0.12)", color: T.text1, fontSize: 12,
+  boxShadow: "0 12px 40px rgba(0,0,0,0.45)", backdropFilter: "blur(12px)",
+};
 
 const mediaShell = (fullscreen) => ({
   position: "relative",

@@ -156,16 +156,18 @@ export default function Card({
 
 function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, menuOpen, setMenuOpen, menuRef }) {
   const buttonRef = useRef(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, maxHeight: 420 });
 
   useLayoutEffect(() => {
     if (!menuOpen || !buttonRef.current) return;
     const place = () => {
       const r = buttonRef.current.getBoundingClientRect();
-      const width = 240;
+      const width = 260;
+      const maxHeight = Math.max(180, Math.min(460, window.innerHeight - 24));
       const left = Math.max(10, Math.min(window.innerWidth - width - 10, r.right - width));
-      const top = Math.min(window.innerHeight - 12, r.bottom + 8);
-      setPos({ top, left });
+      let top = r.bottom + 8;
+      if (top + maxHeight > window.innerHeight - 12) top = Math.max(12, r.top - maxHeight - 8);
+      setPos({ top, left, maxHeight });
     };
     place();
     window.addEventListener("resize", place);
@@ -184,7 +186,8 @@ function CardMenuButton({ item, fav, rating = 0, folders, onToggleFavorite, onAs
         position: "fixed", top: pos.top, left: pos.left, zIndex: 10000,
         background: "rgba(18,18,18,0.98)", border: `1px solid ${T.border}`, backdropFilter: "blur(18px)",
         borderRadius: 12, boxShadow: "0 18px 60px rgba(0,0,0,0.72)",
-        width: 240, maxHeight: "min(420px, calc(100dvh - 24px))", overflow: "auto", padding: 7,
+        width: 260, maxHeight: pos.maxHeight, overflowY: "auto", overflowX: "hidden", padding: 7,
+        overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", scrollbarWidth: "thin",
       }}
     >
       <MenuItem icon="star" label={fav ? "Unfavorite" : "Favorite"} onClick={() => { onToggleFavorite?.(item.key, fav); setMenuOpen(false); }} />

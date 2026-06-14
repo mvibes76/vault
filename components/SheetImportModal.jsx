@@ -66,7 +66,7 @@ export default function SheetImportModal({ onClose, onImport, existingCount = 0 
 
           <label style={label}>Tabs to scan</label>
           <input value={tabsInput} onChange={(e) => setTabsInput(e.target.value)} placeholder="Vault Import, Vault Library" style={input} />
-          <div style={hint}>Expected columns: Title, URL, Folder, Tags, Notes, Type, Source, Thumbnail. Only URL is required.</div>
+          <div style={hint}>Expected columns: Title, URL, Folder, Tags, Notes, Type, Source, Thumbnail. Only URL is required. Folder names keep the exact casing from the sheet.</div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={loadPreview} disabled={loading} style={primaryBtn}>{loading ? "Scanning..." : "Scan Sheet"}</button>
