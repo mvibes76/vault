@@ -7,7 +7,6 @@ import Sidebar from "./Sidebar";
 import BottomNav from "./BottomNav";
 import QuickAddModal from "./QuickAddModal";
 import SheetImportModal from "./SheetImportModal";
-import VaultXR from "./VaultXR";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule, proxiedMediaUrl, normalizeCoverUrl, DEFAULT_SHEET_SOURCE, mergeSheetSources } from "@/lib/utils";
@@ -75,8 +74,6 @@ export default function Vault() {
   const [sidebarOpen, setSidebarOpen]           = useState(false);
   const [isMobile, setIsMobile]                 = useState(false);
   const [installPrompt, setInstallPrompt]       = useState(null);
-  const [xrSupported, setXrSupported]           = useState(false);
-  const [showXR, setShowXR]                     = useState(false);
 
   const [userData, setUserData] = useState({});
   const [folders, setFolders]   = useState([]);
@@ -121,19 +118,6 @@ export default function Vault() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [user]);
-
-  // WebXR Lite detection
-  useEffect(() => {
-    let alive = true;
-    const detect = async () => {
-      try {
-        const ok = !!navigator.xr && await navigator.xr.isSessionSupported("immersive-vr");
-        if (alive) setXrSupported(!!ok);
-      } catch { if (alive) setXrSupported(false); }
-    };
-    detect();
-    return () => { alive = false; };
-  }, []);
 
   // PWA install
   useEffect(() => {
@@ -889,9 +873,6 @@ export default function Vault() {
             onSort={() => setShowSort(!showSort)} sortBy={sortBy}
             onImport={() => setShowImport(true)}
             onQuickAdd={() => setShowQuickAdd(true)}
-            xrSupported={xrSupported}
-            onEnterXR={() => setShowXR(true)}
-            onPreviewXR={() => setShowXR(true)}
           />
         ) : (
           <DesktopTopBar
@@ -903,9 +884,6 @@ export default function Vault() {
             onQuickAdd={() => setShowQuickAdd(true)}
             installPrompt={installPrompt} onInstall={handleInstall}
             showFilterPills={showFilterPills} onToggleFilters={() => setShowFilterPills((v) => !v)}
-            xrSupported={xrSupported}
-            onEnterXR={() => setShowXR(true)}
-            onPreviewXR={() => setShowXR(true)}
           />
         )}
 
@@ -1063,8 +1041,6 @@ export default function Vault() {
       {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} onCreateFolder={handleCreateFolder} />}
       {editingItem && <QuickAddModal mode="edit" initialItem={editingItem} onAdd={(item) => { handleQuickAdd(item); setEditingItem(null); }} onClose={() => setEditingItem(null)} folders={folders} onCreateFolder={handleCreateFolder} />}
       {showImport && <SheetImportModal onClose={() => setShowImport(false)} onImport={handleSheetImport} existingCount={quickAdds.length} sheetSources={sheetSources} defaultSheetSourceId={defaultSheetSourceId} onSaveSheetSources={handleSaveSheetSources} />}
-      {showXR && <VaultXR items={allItems} folders={folders} userData={userData} onOpen={openItem} onClose={() => setShowXR(false)} />}
-
       {activeItem && (
         <Player
           item={activeItem}
@@ -1412,7 +1388,7 @@ const dashSecondary = { padding: "10px 15px", borderRadius: 12, background: "rgb
 
 // ── Layout pieces ────────────────────────────────────────────────────────────
 
-function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onImport, onQuickAdd, xrSupported, onEnterXR }) {
+function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onImport, onQuickAdd }) {
   return (
     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100 }}>
       <button onClick={onMenu} style={iconBtn}><Icon name="menu" size={18} /></button>
@@ -1422,14 +1398,13 @@ function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef,
       }
       {onSort && <button onClick={onSort} style={{ ...iconBtn, background: sortBy !== "default" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.06)" }}><Icon name="sort" size={16} /></button>}
       {onImport && <button onClick={onImport} style={iconBtn} title="Import Sheet"><Icon name="import" size={16} /></button>}
-      {xrSupported && <button onClick={onEnterXR} style={{ ...iconBtn, borderRadius: 12, fontSize: 11, fontWeight: 900 }} title="VR Library">VR</button>}
       {onQuickAdd && <button onClick={onQuickAdd} style={iconBtn} title="Add video"><Icon name="addCircle" size={16} /></button>}
       <button onClick={onSearch} style={iconBtn}><Icon name="search" size={16} /></button>
     </div>
   );
 }
 
-function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall, showFilterPills, onToggleFilters, xrSupported, onEnterXR, onPreviewXR }) {
+function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall, showFilterPills, onToggleFilters }) {
   const [showSortDrop, setShowSortDrop] = useState(false);
   return (
     <div style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100, gap: 12, flexWrap: "wrap" }}>
@@ -1462,8 +1437,6 @@ function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onVie
         </div>
         <button onClick={onToggleFilters} style={{ ...iconBtn, borderRadius: 7, background: showFilterPills ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)" }} title="Show filters"><Icon name="filter" size={16} /></button>
         <button onClick={onImport} style={{ ...iconBtn, borderRadius: 7 }} title="Import Sheet"><Icon name="import" size={16} /></button>
-        {xrSupported && <button onClick={onEnterXR} style={{ ...iconBtn, borderRadius: 7, width: 42, fontSize: 11, fontWeight: 900 }} title="Enter VR Library">VR</button>}
-        {onPreviewXR && <button onClick={onPreviewXR} style={{ ...iconBtn, borderRadius: 7, width: 86, fontSize: 11, fontWeight: 850 }} title="Preview VR room on desktop">VR Preview</button>}
         <button onClick={onQuickAdd} style={{ ...iconBtn, borderRadius: 7 }} title="Add video"><Icon name="addCircle" size={16} /></button>
         {installPrompt && <button onClick={onInstall} style={{ ...iconBtn, borderRadius: 7 }} title="Install app"><Icon name="download" size={15} /></button>}
 
