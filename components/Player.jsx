@@ -454,143 +454,79 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     const [zx, zy] = ZONES[splashZone] || ZONES.C;
     const tx = W * zx;
     const ty = H * zy;
-    const isLeft = slapHand === "L";
+    const flip = slapHand === "L" ? -1 : 1; // mirror for left hand
 
-    // Hand SVG path helpers — draw a stylised hand as filled bezier shapes
-    // We draw on canvas using Path2D-style manual bezier calls
-    // Hand faces toward screen, fingers spread, palm hits flat
+    const SMACK_T  = 0.22;
+    const RECOIL_T = 0.50;
+    const DUR      = 950;
+    const born     = performance.now();
+    const markRot  = (Math.random() - 0.5) * 0.3;
+    const markScl  = 0.9 + Math.random() * 0.2;
 
-    // Palm dimensions
-    const palmW = 80;
-    const palmH = 68;
-
-    // Finger definitions [tipX, tipY, baseL, baseR] relative to palm center
-    const fingers = isLeft ? [
-      { dx: -34, dy: -72, w: 14, tilt: -0.35 }, // pinky
-      { dx: -14, dy: -90, w: 16, tilt: -0.12 }, // ring
-      { dx:   8, dy: -96, w: 18, tilt:  0.04 }, // middle
-      { dx:  28, dy: -88, w: 17, tilt:  0.18 }, // index
-      { dx:  52, dy: -52, w: 14, tilt:  0.7  }, // thumb (spread)
-    ] : [
-      { dx:  34, dy: -72, w: 14, tilt:  0.35 },
-      { dx:  14, dy: -90, w: 16, tilt:  0.12 },
-      { dx:  -8, dy: -96, w: 18, tilt: -0.04 },
-      { dx: -28, dy: -88, w: 17, tilt: -0.18 },
-      { dx: -52, dy: -52, w: 14, tilt: -0.7  },
-    ];
-
-    // Animation phases:
-    // 0.0–0.18  hand flies in from off-screen
-    // 0.18–0.26 smack + impact flash
-    // 0.26–0.55 hand recoils back
-    // 0.26+     red handprint stays, fades slowly
-    const SMACK_T  = 0.20;
-    const RECOIL_T = 0.52;
-    const born = performance.now();
-    const DUR  = 900; // ms total
-
-    // Impact mark: randomise slightly
-    const markRot   = (Math.random() - 0.5) * 0.25;
-    const markScale = 0.88 + Math.random() * 0.24;
-
-    function drawHand(hx, hy, alpha, scale = 1) {
-      ctx.save();
-      ctx.translate(hx, hy);
-      ctx.scale(scale, scale);
-
-      const skinColor = `rgba(240,200,160,${alpha})`;
-      const shadowColor = `rgba(180,120,80,${alpha * 0.6})`;
-
-      // Palm
+    // ── Draw hand as ONE continuous blob path (no per-finger loop jitter) ──
+    // Viewed face-on: palm at bottom, 4 fingers up, thumb to the side
+    // All coords relative to center, then translated/flipped
+    function handPath(ctx, s) {
+      // s = scale factor (shrinks on recoil)
+      const p = (x, y) => [x * s * flip, y * s]; // apply scale + mirror
       ctx.beginPath();
-      ctx.ellipse(0, 0, palmW * 0.5, palmH * 0.5, 0, 0, Math.PI * 2);
-      ctx.fillStyle = skinColor;
-      ctx.shadowColor = `rgba(0,0,0,${alpha * 0.35})`;
-      ctx.shadowBlur  = 12;
-      ctx.fill();
-      ctx.shadowBlur  = 0;
-
-      // Palm crease lines
-      ctx.beginPath();
-      ctx.moveTo(-28, -8); ctx.quadraticCurveTo(0, -18, 26, -6);
-      ctx.strokeStyle = shadowColor;
-      ctx.lineWidth = 1.5; ctx.lineCap = "round"; ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-22, 6); ctx.quadraticCurveTo(0, 2, 20, 10);
-      ctx.stroke();
-
-      // Fingers
-      fingers.forEach((f) => {
-        ctx.save();
-        ctx.translate(f.dx * 0.5, -palmH * 0.3);
-        ctx.rotate(f.tilt);
-        const fh = 42 + Math.random() * 4;
-        // Finger body
-        ctx.beginPath();
-        ctx.moveTo(-f.w * 0.5, 0);
-        ctx.quadraticCurveTo(-f.w * 0.6, -fh * 0.5, -f.w * 0.45, -fh);
-        ctx.quadraticCurveTo(0, -fh - 4, f.w * 0.45, -fh);
-        ctx.quadraticCurveTo(f.w * 0.6, -fh * 0.5, f.w * 0.5, 0);
-        ctx.closePath();
-        ctx.fillStyle = skinColor;
-        ctx.fill();
-        // Knuckle line
-        ctx.beginPath();
-        ctx.moveTo(-f.w * 0.4, -fh * 0.28);
-        ctx.quadraticCurveTo(0, -fh * 0.32, f.w * 0.4, -fh * 0.28);
-        ctx.strokeStyle = shadowColor;
-        ctx.lineWidth = 1.2; ctx.stroke();
-        // Fingernail
-        ctx.beginPath();
-        ctx.ellipse(0, -fh + 5, f.w * 0.32, 6, 0, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,230,200,${alpha * 0.85})`;
-        ctx.fill();
-        ctx.restore();
-      });
-
-      ctx.restore();
+      // Start bottom-left of palm, go clockwise
+      // Palm bottom
+      ctx.moveTo(...p(-38,  30));
+      ctx.bezierCurveTo(...p(-45, 42), ...p( 45, 42), ...p( 38,  30));
+      // Palm right side up to pinky base
+      ctx.bezierCurveTo(...p( 48, 18), ...p( 48,  0), ...p( 44, -10));
+      // Pinky finger
+      ctx.bezierCurveTo(...p( 50,-12), ...p( 54,-55), ...p( 44, -70));
+      ctx.bezierCurveTo(...p( 36,-80), ...p( 28,-78), ...p( 30, -65));
+      ctx.bezierCurveTo(...p( 30,-55), ...p( 34,-16), ...p( 28, -14));
+      // Ring finger
+      ctx.bezierCurveTo(...p( 24,-16), ...p( 22,-85), ...p( 12, -96));
+      ctx.bezierCurveTo(...p(  2,-104), ...p( -8,-100), ...p( -6, -88));
+      ctx.bezierCurveTo(...p( -4,-78), ...p(  4,-16), ...p( -2, -15));
+      // Middle finger
+      ctx.bezierCurveTo(...p( -6,-17), ...p(-14,-92), ...p(-24,-100));
+      ctx.bezierCurveTo(...p(-34,-108), ...p(-44,-102), ...p(-42, -90));
+      ctx.bezierCurveTo(...p(-40,-78), ...p(-30,-16), ...p(-36, -14));
+      // Index finger
+      ctx.bezierCurveTo(...p(-40,-14), ...p(-52,-74), ...p(-58, -80));
+      ctx.bezierCurveTo(...p(-66,-86), ...p(-72,-76), ...p(-68, -66));
+      ctx.bezierCurveTo(...p(-64,-56), ...p(-50, -8), ...p(-50,   2));
+      // Left palm side down to thumb
+      ctx.bezierCurveTo(...p(-52,  8), ...p(-56, 18), ...p(-52,  28));
+      // Thumb (sticking out to the left)
+      ctx.bezierCurveTo(...p(-52, 34), ...p(-80, 30), ...p(-88,  16));
+      ctx.bezierCurveTo(...p(-96,  2), ...p(-86,-12), ...p(-74, -10));
+      ctx.bezierCurveTo(...p(-62, -8), ...p(-48, 20), ...p(-42,  28));
+      ctx.closePath();
     }
 
-    function drawHandprint(px, py, alpha) {
+    // ── Handprint: same silhouette but flattened + squashed ─────────────────
+    function printPath(ctx, s) {
+      const p = (x, y) => [x * s * flip * markScl, y * s * markScl * 0.55]; // squash vertically = flat on glass
       ctx.save();
-      ctx.translate(px, py);
       ctx.rotate(markRot);
-      ctx.scale(markScale, markScale);
-
-      const red = `rgba(190,30,30,${alpha})`;
-      const darkRed = `rgba(140,10,10,${alpha * 0.7})`;
-
-      // Palm print — slightly irregular ellipse
       ctx.beginPath();
-      ctx.ellipse(0, 8, palmW * 0.48, palmH * 0.44, 0, 0, Math.PI * 2);
-      ctx.fillStyle = red;
-      ctx.fill();
-
-      // Finger prints
-      fingers.forEach((f) => {
-        ctx.save();
-        ctx.translate(f.dx * 0.5, -palmH * 0.22);
-        ctx.rotate(f.tilt);
-        ctx.beginPath();
-        ctx.ellipse(0, -26, f.w * 0.42, 14, 0, 0, Math.PI * 2);
-        ctx.fillStyle = red;
-        ctx.fill();
-        // Fingerprint swirl hint
-        ctx.beginPath();
-        ctx.arc(0, -26, f.w * 0.22, 0, Math.PI * 1.4);
-        ctx.strokeStyle = darkRed;
-        ctx.lineWidth = 1.2;
-        ctx.stroke();
-        ctx.restore();
-      });
-
-      // Skin texture — subtle veins/lines
-      ctx.beginPath();
-      ctx.moveTo(-20, -2); ctx.quadraticCurveTo(-5, 8, 18, 4);
-      ctx.moveTo(-15, 10); ctx.quadraticCurveTo(2, 16, 20, 12);
-      ctx.strokeStyle = darkRed;
-      ctx.lineWidth = 1; ctx.stroke();
-
+      ctx.moveTo(...p(-38,  30));
+      ctx.bezierCurveTo(...p(-45, 42), ...p( 45, 42), ...p( 38,  30));
+      ctx.bezierCurveTo(...p( 48, 18), ...p( 48,  0), ...p( 44, -10));
+      ctx.bezierCurveTo(...p( 50,-12), ...p( 54,-55), ...p( 44, -70));
+      ctx.bezierCurveTo(...p( 36,-80), ...p( 28,-78), ...p( 30, -65));
+      ctx.bezierCurveTo(...p( 30,-55), ...p( 34,-16), ...p( 28, -14));
+      ctx.bezierCurveTo(...p( 24,-16), ...p( 22,-85), ...p( 12, -96));
+      ctx.bezierCurveTo(...p(  2,-104), ...p( -8,-100), ...p( -6, -88));
+      ctx.bezierCurveTo(...p( -4,-78), ...p(  4,-16), ...p( -2, -15));
+      ctx.bezierCurveTo(...p( -6,-17), ...p(-14,-92), ...p(-24,-100));
+      ctx.bezierCurveTo(...p(-34,-108), ...p(-44,-102), ...p(-42, -90));
+      ctx.bezierCurveTo(...p(-40,-78), ...p(-30,-16), ...p(-36, -14));
+      ctx.bezierCurveTo(...p(-40,-14), ...p(-52,-74), ...p(-58, -80));
+      ctx.bezierCurveTo(...p(-66,-86), ...p(-72,-76), ...p(-68, -66));
+      ctx.bezierCurveTo(...p(-64,-56), ...p(-50, -8), ...p(-50,   2));
+      ctx.bezierCurveTo(...p(-52,  8), ...p(-56, 18), ...p(-52,  28));
+      ctx.bezierCurveTo(...p(-52, 34), ...p(-80, 30), ...p(-88,  16));
+      ctx.bezierCurveTo(...p(-96,  2), ...p(-86,-12), ...p(-74, -10));
+      ctx.bezierCurveTo(...p(-62, -8), ...p(-48, 20), ...p(-42,  28));
+      ctx.closePath();
       ctx.restore();
     }
 
@@ -598,40 +534,83 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       const t = Math.min(1, (now - born) / DUR);
       ctx.clearRect(0, 0, W, H);
 
+      // ── Fly-in and recoil ────────────────────────────────────────────────
       if (t < RECOIL_T) {
-        // Fly-in: ease in from off-screen side
-        const flyT = Math.min(1, t / SMACK_T);
-        const eased = 1 - Math.pow(1 - flyT, 3); // ease-out cubic
-        const offX  = isLeft ? -W * 0.55 : W * 0.55;
-        const startY = ty - H * 0.3;
-        const hx = tx + offX * (1 - eased);
-        const hy = ty + (startY - ty) * (1 - eased) - (t < SMACK_T ? 0 : (t - SMACK_T) * H * 0.8);
-        const handAlpha = Math.min(1, flyT * 2.5);
-        const squeeze   = t < SMACK_T ? (1 + eased * 0.12) : (1 - (t - SMACK_T) * 1.8);
+        const flyT   = Math.min(1, t / SMACK_T);
+        const eased  = 1 - Math.pow(1 - flyT, 3);
+        const offX   = (isLeft ? -1 : 1) * W * 0.6; // comes from left or right
+        const offY   = -H * 0.28;
+        const hx     = tx + offX * (1 - eased);
+        const hy     = ty + offY * (1 - eased);
+        const recoilT = t < SMACK_T ? 0 : (t - SMACK_T) / (RECOIL_T - SMACK_T);
+        const recoilY = recoilT * H * -0.35;
+        const squeeze = t < SMACK_T
+          ? 1 + eased * 0.08          // slight squish on approach
+          : 1 - recoilT * 0.15;       // bounce back
+        const handA = Math.min(1, flyT * 3);
 
-        drawHand(hx, hy, handAlpha, Math.max(0.1, squeeze));
-
-        // Impact flash at SMACK_T
-        if (t >= SMACK_T && t < SMACK_T + 0.08) {
-          const flashT = (t - SMACK_T) / 0.08;
-          const flashA = (1 - flashT) * 0.7;
-          const flashR = 60 + flashT * 80;
-          const fg = ctx.createRadialGradient(tx, ty, 0, tx, ty, flashR);
-          fg.addColorStop(0,   `rgba(255,230,200,${flashA})`);
-          fg.addColorStop(0.5, `rgba(255,100,80,${flashA * 0.5})`);
-          fg.addColorStop(1,   `rgba(255,50,30,0)`);
-          ctx.beginPath();
-          ctx.arc(tx, ty, flashR, 0, Math.PI * 2);
-          ctx.fillStyle = fg;
-          ctx.fill();
-        }
+        ctx.save();
+        ctx.translate(hx, hy + recoilY);
+        // Skin gradient for 3D feel
+        const hGrd = ctx.createRadialGradient(-20 * flip, -30, 8, 0, 0, 120);
+        hGrd.addColorStop(0,    `rgba(255,220,175,${handA})`);
+        hGrd.addColorStop(0.5,  `rgba(235,185,130,${handA})`);
+        hGrd.addColorStop(1,    `rgba(195,140,90,${handA * 0.8})`);
+        handPath(ctx, squeeze);
+        ctx.fillStyle = hGrd;
+        ctx.shadowColor = `rgba(0,0,0,${handA * 0.4})`;
+        ctx.shadowBlur  = 18;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
+        // Edge outline
+        handPath(ctx, squeeze);
+        ctx.strokeStyle = `rgba(170,110,65,${handA * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
       }
 
-      // Handprint — appears at SMACK_T and slowly fades
+      // ── Impact flash ─────────────────────────────────────────────────────
+      if (t >= SMACK_T && t < SMACK_T + 0.1) {
+        const ft = (t - SMACK_T) / 0.1;
+        const fa = (1 - ft) * 0.75;
+        const fr = 50 + ft * 100;
+        const fg = ctx.createRadialGradient(tx, ty, 0, tx, ty, fr);
+        fg.addColorStop(0,   `rgba(255,240,200,${fa})`);
+        fg.addColorStop(0.4, `rgba(255,120,60,${fa * 0.55})`);
+        fg.addColorStop(1,   `rgba(220,40,20,0)`);
+        ctx.beginPath();
+        ctx.arc(tx, ty, fr, 0, Math.PI * 2);
+        ctx.fillStyle = fg;
+        ctx.fill();
+      }
+
+      // ── Handprint welt — appears on smack, stays and fades ───────────────
       if (t >= SMACK_T) {
-        const printAge  = (t - SMACK_T) / (1 - SMACK_T);
-        const printAlpha = Math.max(0, 1 - printAge * 0.55); // stays visible long
-        drawHandprint(tx, ty, printAlpha);
+        const age  = (t - SMACK_T) / (1 - SMACK_T);
+        const pa   = Math.max(0, 0.92 - age * 0.58);
+        // Outer welt glow (skin reaction)
+        ctx.save();
+        ctx.translate(tx, ty);
+        printPath(ctx, 1);
+        const welt = ctx.createRadialGradient(0, -20 * markScl, 0, 0, 0, 110 * markScl);
+        welt.addColorStop(0,   `rgba(210,45,45,${pa})`);
+        welt.addColorStop(0.55,`rgba(185,25,25,${pa * 0.85})`);
+        welt.addColorStop(0.85,`rgba(155,15,15,${pa * 0.5})`);
+        welt.addColorStop(1,   `rgba(120,10,10,0)`);
+        ctx.fillStyle = welt;
+        ctx.shadowColor = `rgba(200,30,30,${pa * 0.6})`;
+        ctx.shadowBlur  = 22;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
+        // Inner darker print
+        ctx.save();
+        ctx.globalAlpha = pa * 0.45;
+        printPath(ctx, 0.82);
+        ctx.fillStyle = "rgba(130,10,10,1)";
+        ctx.fill();
+        ctx.restore();
+        ctx.restore();
       }
 
       if (t < 1) {
@@ -676,27 +655,29 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       };
     });
 
-    // ── Arms: quadratic bezier curves — organic, pinched in middle, liquid feel
-    const arms = Array.from({ length: 8 + Math.floor(Math.random() * 6) }, () => {
-      const a   = Math.random() * Math.PI * 2;
-      const len = 55 + Math.random() * 110;
-      // Control point offset: perpendicular to arm direction for natural curve
-      const perpA = a + Math.PI * 0.5 * (Math.random() > 0.5 ? 1 : -1);
-      const cpDist = 20 + Math.random() * 50;
-      const cpT    = 0.35 + Math.random() * 0.3; // where along arm the control point is
+    // ── Tendrils: thick filled shapes, not stroked lines ─────────────────────
+    // Each tendril is drawn as a filled path: two bezier edges + rounded tip
+    const arms = Array.from({ length: 6 + Math.floor(Math.random() * 4) }, () => {
+      const a      = Math.random() * Math.PI * 2;
+      const len    = 70 + Math.random() * 120;
+      const perpA  = a + Math.PI * 0.5 * (Math.random() > 0.5 ? 1 : -1);
+      const cpDist = 25 + Math.random() * 55;
       return {
-        ax: cx, ay: cy,
+        angle: a,
+        len,
+        // Root width (fat) and tip radius
+        rootW: 18 + Math.random() * 28,
+        tipR:  8  + Math.random() * 14,
+        // Bezier control point for the spine of the tendril
+        cpx: cx + Math.cos(a) * len * 0.45 + Math.cos(perpA) * cpDist,
+        cpy: cy + Math.sin(a) * len * 0.45 + Math.sin(perpA) * cpDist,
+        // End point
         ex: cx + Math.cos(a) * len,
-        ey: cy + Math.sin(a) * len + 14 + Math.random() * 18,
-        // Quadratic control point — pulls the arm into an organic curve
-        cpx: cx + Math.cos(a) * len * cpT + Math.cos(perpA) * cpDist,
-        cpy: cy + Math.sin(a) * len * cpT + Math.sin(perpA) * cpDist,
-        w: 5 + Math.random() * 13,
+        ey: cy + Math.sin(a) * len + 10 + Math.random() * 20,
         prog: 0,
-        speed: 0.06 + Math.random() * 0.06,
+        speed: 0.055 + Math.random() * 0.05,
         life: 1,
-        decay: 0.018 + Math.random() * 0.01,
-        tipR: 3 + Math.random() * 5,
+        decay: 0.015 + Math.random() * 0.01,
       };
     });
 
@@ -762,51 +743,65 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       });
       ctx.restore();
 
-      // ── Arms — quadratic bezier, tapered by stepping segments ────────────
+      // ── Tendrils — drawn as filled shapes, fat at root, rounded tip ────────
       arms.forEach((arm) => {
         if (arm.life <= 0) return;
         arm.prog  = Math.min(1, arm.prog + arm.speed);
         arm.life -= arm.decay;
         const p  = arm.prog;
         const al = arm.life;
+        if (p <= 0.01) return;
 
-        // Step along quadratic bezier to draw tapered segments
-        const steps = 20;
-        for (let i = 0; i < steps; i++) {
-          const t0 = (i / steps) * p;
-          const t1 = Math.min(p, ((i + 1) / steps) * p);
-          if (t1 <= t0) break;
-          // Quadratic bezier point B(t) = (1-t)²·P0 + 2(1-t)t·CP + t²·P1
-          const bx0 = (1-t0)*(1-t0)*arm.ax + 2*(1-t0)*t0*arm.cpx + t0*t0*arm.ex;
-          const by0 = (1-t0)*(1-t0)*arm.ay + 2*(1-t0)*t0*arm.cpy + t0*t0*arm.ey;
-          const bx1 = (1-t1)*(1-t1)*arm.ax + 2*(1-t1)*t1*arm.cpx + t1*t1*arm.ex;
-          const by1 = (1-t1)*(1-t1)*arm.ay + 2*(1-t1)*t1*arm.cpy + t1*t1*arm.ey;
+        // Tip position along bezier at progress p
+        const tipX = (1-p)*(1-p)*cx + 2*(1-p)*p*arm.cpx + p*p*arm.ex;
+        const tipY = (1-p)*(1-p)*cy + 2*(1-p)*p*arm.cpy + p*p*arm.ey;
 
-          // Viscous pinch: thinnest at ~40% of length (surface tension effect)
-          const pinch = 1 - Math.pow(Math.abs(t0 - 0.4) * 1.8, 1.5) * 0.35;
-          const w = Math.max(0.4, arm.w * (1 - t0 * 0.82) * pinch * al);
+        // Spine tangent at tip — perpendicular gives us the width offset
+        const dt  = 0.02;
+        const p2  = Math.min(1, p + dt);
+        const tx2 = (1-p2)*(1-p2)*cx + 2*(1-p2)*p2*arm.cpx + p2*p2*arm.ex;
+        const ty2 = (1-p2)*(1-p2)*cy + 2*(1-p2)*p2*arm.cpy + p2*p2*arm.ey;
+        const tang = Math.atan2(ty2 - tipY, tx2 - tipX);
+        const perp = tang + Math.PI * 0.5;
 
-          ctx.beginPath();
-          ctx.moveTo(bx0, by0);
-          ctx.lineTo(bx1, by1);
-          ctx.strokeStyle = `rgba(255,255,255,${al * (1 - t0 * 0.45)})`;
-          ctx.lineWidth   = w;
-          ctx.lineCap     = "round";
-          ctx.stroke();
-        }
+        // Root width tapers to near-zero at tip
+        const rootW = arm.rootW * al;
+        const midW  = rootW * 0.55; // slight waist in the middle
 
-        // Tip bead — blob at end of arm
-        if (p > 0.55) {
-          const tipX = (1-p)*(1-p)*arm.ax + 2*(1-p)*p*arm.cpx + p*p*arm.ex;
-          const tipY = (1-p)*(1-p)*arm.ay + 2*(1-p)*p*arm.cpy + p*p*arm.ey;
-          const tipGrd = ctx.createRadialGradient(tipX - arm.tipR*0.3, tipY - arm.tipR*0.3, 0.5, tipX, tipY, arm.tipR * al);
-          tipGrd.addColorStop(0, `rgba(255,255,255,${al * 0.95})`);
-          tipGrd.addColorStop(1, `rgba(255,255,255,0)`);
-          ctx.beginPath();
-          ctx.arc(tipX, tipY, arm.tipR * al * Math.min(1, (p - 0.4) * 2), 0, Math.PI * 2);
-          ctx.fillStyle = tipGrd;
-          ctx.fill();
-        }
+        // Draw filled tendril: left bezier edge → rounded tip arc → right edge back → root arc
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(perp) * rootW, cy + Math.sin(perp) * rootW);
+        // Left bezier edge to tip
+        ctx.quadraticCurveTo(
+          arm.cpx + Math.cos(perp) * midW,
+          arm.cpy + Math.sin(perp) * midW,
+          tipX + Math.cos(perp) * arm.tipR * al * p,
+          tipY + Math.sin(perp) * arm.tipR * al * p
+        );
+        // Rounded tip arc
+        ctx.arc(tipX, tipY, arm.tipR * al * p, perp, perp + Math.PI, false);
+        // Right bezier edge back to root
+        ctx.quadraticCurveTo(
+          arm.cpx - Math.cos(perp) * midW,
+          arm.cpy - Math.sin(perp) * midW,
+          cx - Math.cos(perp) * rootW,
+          cy - Math.sin(perp) * rootW
+        );
+        // Root arc to close
+        ctx.arc(cx, cy, rootW, perp + Math.PI, perp, false);
+        ctx.closePath();
+
+        // Fill with gradient: bright at root, semi-transparent at tip
+        const tGrd = ctx.createLinearGradient(cx, cy, tipX, tipY);
+        tGrd.addColorStop(0,    `rgba(255,255,255,${al * 0.92})`);
+        tGrd.addColorStop(0.4,  `rgba(248,252,255,${al * 0.80})`);
+        tGrd.addColorStop(0.75, `rgba(235,245,255,${al * 0.60})`);
+        tGrd.addColorStop(1,    `rgba(220,238,255,${al * 0.20})`);
+        ctx.fillStyle = tGrd;
+        ctx.shadowColor = "rgba(255,255,255,0.3)";
+        ctx.shadowBlur  = 6;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
       });
 
       // ── Droplets ─────────────────────────────────────────────────────────
