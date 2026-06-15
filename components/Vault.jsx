@@ -10,7 +10,7 @@ import SheetImportModal from "./SheetImportModal";
 import VaultXR from "./VaultXR";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
-import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule, proxiedMediaUrl, normalizeCoverUrl } from "@/lib/utils";
+import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule, proxiedMediaUrl, normalizeCoverUrl, DEFAULT_SHEET_SOURCE, mergeSheetSources } from "@/lib/utils";
 import { SOURCE_OPTIONS, getThumbCandidates } from "@/lib/sources";
 import {
   supabase, isSupabaseConfigured, getUserData, toggleFavorite,
@@ -37,8 +37,10 @@ const SORT_OPTIONS = [
 
 export default function Vault() {
   const [user, setUser]               = useState(null);
-  const [sheetId, setSheetId]         = useState("");
+  const [sheetId, setSheetId]         = useState(DEFAULT_SHEET_SOURCE.sheetId);
   const [manualTabs, setManualTabs]   = useState(null);
+  const [sheetSources, setSheetSources] = useState(() => mergeSheetSources([]));
+  const [defaultSheetSourceId, setDefaultSheetSourceId] = useState(DEFAULT_SHEET_SOURCE.id);
   const [tabs, setTabs]               = useState([]);
   const [activeView, setActiveView]   = useState("home");
   const [loading, setLoading]         = useState(false);
@@ -188,6 +190,9 @@ export default function Vault() {
           }
           if (settings?.view_mode) setViewMode(settings.view_mode);
           if (Array.isArray(settings?.cover_rules)) setCoverRules(settings.cover_rules);
+          const savedSources = mergeSheetSources(settings?.sheet_sources || []);
+          setSheetSources(savedSources);
+          if (settings?.default_sheet_source_id) setDefaultSheetSourceId(settings.default_sheet_source_id);
           if (settings?.sheet_id) {
             // v12: Sheets is a mirror, not a source. Keep the id for legacy settings, but do not load tabs.
             setSheetId(settings.sheet_id); setManualTabs(settings.manual_tabs || null);
@@ -197,6 +202,10 @@ export default function Vault() {
       try {
         const saved = localStorage.getItem("vv_sheet_id");
         const savedTabs = localStorage.getItem("vv_manual_tabs");
+        const localSources = localStorage.getItem("vv_sheet_sources");
+        const localDefault = localStorage.getItem("vv_default_sheet_source_id");
+        if (localSources) setSheetSources(mergeSheetSources(JSON.parse(localSources)));
+        if (localDefault) setDefaultSheetSourceId(localDefault);
         if (saved) {
           // v12 keeps legacy sheet id only for reference. App data loads from Supabase/local vault items.
           setSheetId(saved);
@@ -220,6 +229,19 @@ export default function Vault() {
     } catch {}
     if (user) saveSettings(user.id, { sheet_id: id, manual_tabs: mt });
     setShowConfig(false); setNeedsManualTabs(false);
+  };
+
+
+  const handleSaveSheetSources = async (nextSources, nextDefaultId = defaultSheetSourceId) => {
+    const merged = mergeSheetSources(nextSources || []);
+    const defaultId = merged.some((s) => s.id === nextDefaultId) ? nextDefaultId : DEFAULT_SHEET_SOURCE.id;
+    setSheetSources(merged);
+    setDefaultSheetSourceId(defaultId);
+    try {
+      localStorage.setItem("vv_sheet_sources", JSON.stringify(merged));
+      localStorage.setItem("vv_default_sheet_source_id", defaultId);
+    } catch {}
+    if (user) await saveSettings(user.id, { sheet_sources: merged, default_sheet_source_id: defaultId });
   };
 
   // ── Aggregated items ──────────────────────────────────────────────────────
@@ -869,6 +891,7 @@ export default function Vault() {
             onQuickAdd={() => setShowQuickAdd(true)}
             xrSupported={xrSupported}
             onEnterXR={() => setShowXR(true)}
+            onPreviewXR={() => setShowXR(true)}
           />
         ) : (
           <DesktopTopBar
@@ -882,6 +905,7 @@ export default function Vault() {
             showFilterPills={showFilterPills} onToggleFilters={() => setShowFilterPills((v) => !v)}
             xrSupported={xrSupported}
             onEnterXR={() => setShowXR(true)}
+            onPreviewXR={() => setShowXR(true)}
           />
         )}
 
@@ -1035,10 +1059,10 @@ export default function Vault() {
 
       {isMobile && <BottomNav activeTab={activeBottomTab} onTab={handleBottomTab} />}
 
-      {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} coverRules={coverRules} onSaveCoverRules={handleSaveCoverRules} coverLibrary={coverLibrary} onSaveCover={handleSaveCover} onDeleteCover={handleDeleteCover} diagnostics={diagnostics} onExportJSON={handleExportJSON} onExportCSV={handleExportCSV} />}
+      {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} coverRules={coverRules} onSaveCoverRules={handleSaveCoverRules} coverLibrary={coverLibrary} onSaveCover={handleSaveCover} onDeleteCover={handleDeleteCover} diagnostics={diagnostics} sheetSources={sheetSources} defaultSheetSourceId={defaultSheetSourceId} onSaveSheetSources={handleSaveSheetSources} onExportJSON={handleExportJSON} onExportCSV={handleExportCSV} />}
       {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} onCreateFolder={handleCreateFolder} />}
       {editingItem && <QuickAddModal mode="edit" initialItem={editingItem} onAdd={(item) => { handleQuickAdd(item); setEditingItem(null); }} onClose={() => setEditingItem(null)} folders={folders} onCreateFolder={handleCreateFolder} />}
-      {showImport && <SheetImportModal onClose={() => setShowImport(false)} onImport={handleSheetImport} existingCount={quickAdds.length} />}
+      {showImport && <SheetImportModal onClose={() => setShowImport(false)} onImport={handleSheetImport} existingCount={quickAdds.length} sheetSources={sheetSources} defaultSheetSourceId={defaultSheetSourceId} onSaveSheetSources={handleSaveSheetSources} />}
       {showXR && <VaultXR items={allItems} folders={folders} userData={userData} onOpen={openItem} onClose={() => setShowXR(false)} />}
 
       {activeItem && (
@@ -1405,7 +1429,7 @@ function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef,
   );
 }
 
-function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall, showFilterPills, onToggleFilters, xrSupported, onEnterXR }) {
+function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall, showFilterPills, onToggleFilters, xrSupported, onEnterXR, onPreviewXR }) {
   const [showSortDrop, setShowSortDrop] = useState(false);
   return (
     <div style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100, gap: 12, flexWrap: "wrap" }}>
@@ -1439,6 +1463,7 @@ function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onVie
         <button onClick={onToggleFilters} style={{ ...iconBtn, borderRadius: 7, background: showFilterPills ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)" }} title="Show filters"><Icon name="filter" size={16} /></button>
         <button onClick={onImport} style={{ ...iconBtn, borderRadius: 7 }} title="Import Sheet"><Icon name="import" size={16} /></button>
         {xrSupported && <button onClick={onEnterXR} style={{ ...iconBtn, borderRadius: 7, width: 42, fontSize: 11, fontWeight: 900 }} title="Enter VR Library">VR</button>}
+        {onPreviewXR && <button onClick={onPreviewXR} style={{ ...iconBtn, borderRadius: 7, width: 86, fontSize: 11, fontWeight: 850 }} title="Preview VR room on desktop">VR Preview</button>}
         <button onClick={onQuickAdd} style={{ ...iconBtn, borderRadius: 7 }} title="Add video"><Icon name="addCircle" size={16} /></button>
         {installPrompt && <button onClick={onInstall} style={{ ...iconBtn, borderRadius: 7 }} title="Install app"><Icon name="download" size={15} /></button>}
 

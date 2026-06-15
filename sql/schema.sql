@@ -198,3 +198,7 @@ alter table user_data add column if not exists oil_count int default 0;
 alter table user_data add column if not exists last_oiled_at timestamptz;
 create index if not exists idx_user_data_oil_count on user_data(user_id, oil_count);
 create index if not exists idx_user_data_last_oiled on user_data(user_id, last_oiled_at);
+
+-- v35: saved Google Sheet import sources. Sheets remain import/mirror helpers, Supabase remains source of truth.
+alter table user_settings add column if not exists sheet_sources jsonb default '[]'::jsonb;
+alter table user_settings add column if not exists default_sheet_source_id text default 'vault-library-default';

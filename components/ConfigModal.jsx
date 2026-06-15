@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { extractSheetId, splitKeywords, normalizeCoverUrl, proxiedMediaUrl } from "@/lib/utils";
+import { extractSheetId, extractSheetGid, splitKeywords, normalizeCoverUrl, proxiedMediaUrl, DEFAULT_SHEET_SOURCE, mergeSheetSources, normalizeSheetSource } from "@/lib/utils";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 
@@ -58,6 +58,9 @@ export default function ConfigModal({
   onSaveCover,
   onDeleteCover,
   diagnostics = {},
+  sheetSources = [],
+  defaultSheetSourceId = DEFAULT_SHEET_SOURCE.id,
+  onSaveSheetSources,
   onExportJSON,
   onExportCSV,
 }) {
@@ -66,6 +69,8 @@ export default function ConfigModal({
   const [tabsInput, setTabsInput] = useState("");
   const [warning, setWarning] = useState(needsManualTabs ? "manual" : "");
   const [coverInput, setCoverInput] = useState(() => (coverRules || []).map((r) => `${r.tag}=${r.thumbnail}`).join("\n"));
+  const [sourceForm, setSourceForm] = useState(() => normalizeSheetSource(DEFAULT_SHEET_SOURCE));
+  const resolvedSheetSources = mergeSheetSources(sheetSources);
   const [coverForm, setCoverForm] = useState(emptyCover);
   const ref = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -111,6 +116,34 @@ export default function ConfigModal({
     onSave(extractSheetId(val), manualTabs);
   };
 
+  const saveSheetSource = () => {
+    const url = String(sourceForm.url || "").trim();
+    const sheetId = String(sourceForm.sheetId || extractSheetId(url) || "").trim();
+    const gid = String(sourceForm.gid || extractSheetGid(url) || "").trim();
+    if (!sheetId) return;
+    const nextSource = normalizeSheetSource({
+      ...sourceForm,
+      sheetId,
+      gid,
+      tab: sourceForm.tab || (gid ? `gid:${gid}` : "Vault Import"),
+      tabsText: sourceForm.tabsText || (gid ? `gid:${gid}` : "Vault Import, Vault Library"),
+    });
+    const next = mergeSheetSources([nextSource, ...resolvedSheetSources.filter((s) => s.id !== nextSource.id)]);
+    onSaveSheetSources?.(next, defaultSheetSourceId || DEFAULT_SHEET_SOURCE.id);
+    setSourceForm(normalizeSheetSource(DEFAULT_SHEET_SOURCE));
+  };
+
+  const deleteSheetSource = (id) => {
+    if (id === DEFAULT_SHEET_SOURCE.id) return;
+    const next = resolvedSheetSources.filter((s) => s.id !== id);
+    const nextDefault = defaultSheetSourceId === id ? DEFAULT_SHEET_SOURCE.id : defaultSheetSourceId;
+    onSaveSheetSources?.(next, nextDefault);
+  };
+
+  const setDefaultSheetSource = (id) => {
+    onSaveSheetSources?.(resolvedSheetSources, id);
+  };
+
   const handleSaveLegacyCovers = () => {
     const rules = coverInput.split("\n")
       .map((line) => line.trim())
@@ -146,6 +179,7 @@ export default function ConfigModal({
   };
 
   const canSaveSheet = val.trim() && !isPublishedExportUrl(val);
+  const canSaveSource = !!String(sourceForm.url || sourceForm.sheetId || "").trim();
   const canSaveCover = coverForm.label.trim() && /^https?:\/\//i.test(normalizeCoverUrl(coverForm.thumbnail.trim()));
   const previewUrl = coverForm.thumbnail ? proxiedMediaUrl(normalizeCoverUrl(coverForm.thumbnail)) : "";
 
@@ -179,48 +213,78 @@ export default function ConfigModal({
         </div>
 
         {activeTab === "sheet" && (
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: T.text1, marginBottom: 6 }}>
-              {needsManualTabs ? "Add tab names" : "Connect Google Sheet"}
-            </div>
-            <div style={{ fontSize: 12, color: T.text3, marginBottom: 14 }}>
-              {needsManualTabs
-                ? "We couldn't auto-detect your tabs. Type them comma-separated below."
-                : "Paste the sheet URL or ID. Sheets can collect links; Supabase stays the vault."}
-            </div>
-
-            <input
-              ref={ref}
-              value={val}
-              onChange={(e) => handleChange(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-              style={inputStyle(isMobile)}
-            />
-
-            {(needsManualTabs || warning === "manual") && (
-              <input
-                value={tabsInput}
-                onChange={(e) => setTabsInput(e.target.value)}
-                placeholder="Tab1, Tab2, Tab3"
-                style={{ ...inputStyle(isMobile), marginTop: 8 }}
-              />
-            )}
-
-            {warning === "published" && (
-              <div style={warnBox}>
-                That's a "Publish to web" URL. The vault needs the regular share URL, not the published one. In the sheet: Share, set to "Anyone with the link", copy that URL.
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={panelStyle}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: T.text1, marginBottom: 5 }}>Sheet sources</div>
+              <div style={{ fontSize: 12, color: T.text4, lineHeight: 1.5, marginBottom: 12 }}>Save the Sheets you use for collecting links. Import can read by tab name or by gid. No OAuth needed, but the sheet must be viewable by link.</div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {resolvedSheetSources.map((source) => (
+                  <div key={source.id} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr auto", gap: 8, alignItems: "center", padding: 10, border: `1px solid ${source.id === defaultSheetSourceId ? T.borderHov : T.borderSub}`, borderRadius: 12, background: source.id === defaultSheetSourceId ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.035)" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: T.text1, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{source.name}</div>
+                        {source.id === defaultSheetSourceId && <span style={{ fontSize: 9, color: "#111", background: "#fff", borderRadius: 999, padding: "2px 6px", fontWeight: 900 }}>DEFAULT</span>}
+                      </div>
+                      <div style={{ fontSize: 10, color: T.text4, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{source.tabsText || source.tab || source.gid || "Vault Import"}</div>
+                      <div style={{ fontSize: 10, color: T.text4, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{source.sheetId}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button onClick={() => setDefaultSheetSource(source.id)} style={smallBtn}>Default</button>
+                      <button onClick={() => setSourceForm(source)} style={smallBtn}>Edit</button>
+                      {source.id !== DEFAULT_SHEET_SOURCE.id && <button onClick={() => { if (window.confirm(`Delete sheet source "${source.name}"?`)) deleteSheetSource(source.id); }} style={{ ...smallBtn, color: "#ff9b9b" }}>Delete</button>}
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
-
-            <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-              {savedId && !needsManualTabs && <button onClick={onClose} style={btnSecondary}>Cancel</button>}
-              <button onClick={handleSave} disabled={!canSaveSheet} style={{ ...btnPrimary, opacity: canSaveSheet ? 1 : 0.4, cursor: canSaveSheet ? "pointer" : "not-allowed", flex: 1 }}>
-                {needsManualTabs ? "Load with these tabs" : savedId ? "Update" : "Connect"}
-              </button>
             </div>
 
-            <div style={{ marginTop: 14, fontSize: 11, color: T.text4, lineHeight: 1.5 }}>
-              Sheet columns: <b>url</b> required, plus <b>title</b>, <b>note</b>, <b>tags</b>, <b>folder</b>, <b>thumbnail</b>. The Thumbnail column can be a normal image URL or a Google Drive image file link.
+            <div style={panelStyle}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: T.text1, marginBottom: 5 }}>{sourceForm.id && resolvedSheetSources.some((s) => s.id === sourceForm.id) ? "Edit Sheet source" : "Add Sheet source"}</div>
+              <label style={label}>Source name</label>
+              <input value={sourceForm.name || ""} onChange={(e) => setSourceForm((f) => ({ ...f, name: e.target.value }))} placeholder="Vault Library" style={inputStyle(isMobile)} />
+              <label style={{ ...label, marginTop: 9 }}>Sheet URL or ID</label>
+              <input value={sourceForm.url || ""} onChange={(e) => {
+                const url = e.target.value;
+                setSourceForm((f) => ({ ...f, url, sheetId: extractSheetId(url), gid: extractSheetGid(url) || f.gid, tab: extractSheetGid(url) ? `gid:${extractSheetGid(url)}` : f.tab }));
+              }} placeholder="https://docs.google.com/spreadsheets/d/..." style={inputStyle(isMobile)} />
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginTop: 9 }}>
+                <div>
+                  <label style={label}>Default tab / gid</label>
+                  <input value={sourceForm.tab || ""} onChange={(e) => setSourceForm((f) => ({ ...f, tab: e.target.value }))} placeholder="gid:355378672 or Vault Import" style={inputStyle(isMobile)} />
+                </div>
+                <div>
+                  <label style={label}>Tabs to scan</label>
+                  <input value={sourceForm.tabsText || ""} onChange={(e) => setSourceForm((f) => ({ ...f, tabsText: e.target.value }))} placeholder="gid:355378672, Vault Import" style={inputStyle(isMobile)} />
+                </div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: T.text4, lineHeight: 1.5 }}>Use <b>gid:355378672</b> for a specific tab from the URL. You can also use regular tab names.</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <button onClick={saveSheetSource} disabled={!canSaveSource} style={{ ...btnPrimary, opacity: canSaveSource ? 1 : 0.45 }}>{sourceForm.id && resolvedSheetSources.some((s) => s.id === sourceForm.id) ? "Save Source" : "Add Source"}</button>
+                <button onClick={() => setSourceForm(normalizeSheetSource(DEFAULT_SHEET_SOURCE))} style={btnSecondary}>Reset Form</button>
+              </div>
+            </div>
+
+            <div style={panelStyle}>
+              <div style={{ fontSize: 12, color: T.text4, lineHeight: 1.5 }}>
+                Legacy single Sheet ID remains below for older installs. The new import flow uses Sheet Sources above.
+              </div>
+              <input
+                ref={ref}
+                value={val}
+                onChange={(e) => handleChange(e.target.value)}
+                placeholder="Legacy Sheet URL / ID"
+                style={{ ...inputStyle(isMobile), marginTop: 10 }}
+              />
+              {(needsManualTabs || warning === "manual") && (
+                <input
+                  value={tabsInput}
+                  onChange={(e) => setTabsInput(e.target.value)}
+                  placeholder="Tab1, Tab2, Tab3"
+                  style={{ ...inputStyle(isMobile), marginTop: 8 }}
+                />
+              )}
+              {warning === "published" && <div style={warnBox}>That's a "Publish to web" URL. Use the regular share URL instead.</div>}
+              <button onClick={handleSave} disabled={!canSaveSheet} style={{ ...btnSecondary, opacity: canSaveSheet ? 1 : 0.4, marginTop: 10 }}>Save legacy Sheet ID</button>
             </div>
           </div>
         )}

@@ -215,8 +215,11 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
   const [selectedShelf, setSelectedShelf] = useState(0);
   const [selectedItem, setSelectedItem] = useState(0);
   const [mode, setMode] = useState("wall");
+  const [escHint, setEscHint] = useState(false);
 
   const shelfRef = useRef(0);
+  const lastEscRef = useRef(0);
+  const escTimerRef = useRef(null);
   const itemRef = useRef(0);
   const modeRef = useRef("wall");
 
@@ -229,11 +232,31 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
   useEffect(() => { itemRef.current = selectedItem; }, [selectedItem]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
+  function requestEscapeClose() {
+    const now = Date.now();
+    if (now - lastEscRef.current < 950) {
+      if (escTimerRef.current) clearTimeout(escTimerRef.current);
+      escTimerRef.current = null;
+      lastEscRef.current = 0;
+      setEscHint(false);
+      closeAll();
+      return;
+    }
+    lastEscRef.current = now;
+    setEscHint(true);
+    setStatus("Press Esc again to exit VR preview.");
+    if (escTimerRef.current) clearTimeout(escTimerRef.current);
+    escTimerRef.current = setTimeout(() => {
+      setEscHint(false);
+      lastEscRef.current = 0;
+    }, 1300);
+  }
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        closeAll();
+        requestEscapeClose();
       }
       if (e.key === "ArrowLeft") prevShelf();
       if (e.key === "ArrowRight") nextShelf();
@@ -246,7 +269,10 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
     return () => window.removeEventListener("keydown", onKey);
   }, [shelves, activeItems, activeItem]);
 
-  useEffect(() => () => closeSessionOnly(), []);
+  useEffect(() => () => {
+    if (escTimerRef.current) clearTimeout(escTimerRef.current);
+    closeSessionOnly();
+  }, []);
 
   const closeSessionOnly = useCallback(() => {
     glCleanupRef.current?.();
@@ -429,9 +455,15 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
           <div>
             <div style={{ fontSize: 12, color: T.text4, textTransform: "uppercase", letterSpacing: 1.4 }}>WebXR Library</div>
             <div style={{ fontSize: 27, fontWeight: 950, letterSpacing: -1 }}>Ambient Vault</div>
+            <div style={{ fontSize: 12, color: T.text4, marginTop: 4 }}>Desktop preview is safe to test without a headset. Press Esc twice to exit.</div>
           </div>
           <button onClick={closeAll} style={xrButton(false)}>Close</button>
         </div>
+        {escHint && (
+          <div style={{ position: "fixed", top: 18, left: "50%", transform: "translateX(-50%)", zIndex: 5, padding: "10px 14px", borderRadius: 999, border: "1px solid rgba(255,255,255,.18)", background: "rgba(20,20,24,.84)", backdropFilter: "blur(16px)", color: "#fff", fontSize: 12, fontWeight: 800, boxShadow: "0 18px 60px rgba(0,0,0,.45)" }}>
+            Press Esc again to exit
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(230px, 300px) minmax(0, 1fr) minmax(260px, 360px)", gap: 14, alignItems: "stretch" }} className="xr-shell-grid">
           <section style={panelStyle}>
@@ -510,6 +542,7 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
               <div>Select cycles media.</div>
               <div>Squeeze cycles shelves.</div>
               <div>Overlay buttons work when DOM Overlay is available.</div>
+              <div>Desktop preview: arrows move, Enter opens, M toggles, Esc twice exits.</div>
               <div style={{ marginTop: 10, color: T.text4 }}>{status}</div>
             </div>
           </section>

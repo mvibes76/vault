@@ -150,3 +150,15 @@ No Supabase migration is required for v33.
 ### v34 VR Upgrade
 
 WebXR Lite now opens an Ambient Vault mode with shelf navigation, a media wall, a selected-item screen, wall/cinema mode, controller-friendly controls, and desktop keyboard fallback for testing. Opening a selected item exits VR and uses the normal Vault player. No Supabase schema change is required.
+
+## v35 Sheet Sources
+
+- The provided Google Sheet is built in as the first/default import source.
+- Settings → Google Sheet now manages saved Sheet Sources.
+- Import from Sheet now includes a source dropdown and supports tab names or `gid:...` values.
+- No OAuth or Google console setup is required. The Sheet must be shared as "Anyone with the link can view".
+- Run `sql/schema.sql` once to add `sheet_sources` and `default_sheet_source_id` to `user_settings`.
+
+## v36 VR Preview
+
+Desktop now includes a **VR Preview** button for testing the Ambient Vault interface without a headset. WebXR-capable devices still get the real **VR** entry. Press `Esc` twice to exit the VR preview.

@@ -101,20 +101,32 @@ function parseSheetRows(csv, tabName) {
   return { items, skipped };
 }
 
+function normalizeTabRef(tabName) {
+  const raw = String(tabName || "").trim();
+  if (!raw) return { label: "Vault Import", qs: `sheet=${encodeURIComponent("Vault Import")}` };
+  const gidMatch = raw.match(/^(?:gid:|gid=)?([0-9]{2,})$/i) || raw.match(/[?&#]gid=([0-9]+)/i);
+  if (gidMatch) return { label: `gid:${gidMatch[1]}`, qs: `gid=${encodeURIComponent(gidMatch[1])}` };
+  return { label: raw, qs: `sheet=${encodeURIComponent(raw)}` };
+}
+
 async function fetchTab(sheetId, tabName) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+  const ref = normalizeTabRef(tabName);
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&${ref.qs}`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" });
-  if (!res.ok) throw new Error(`Could not fetch tab "${tabName}" (${res.status}). Share the sheet as Anyone with link can view.`);
+  if (!res.ok) throw new Error(`Could not fetch tab "${ref.label}" (${res.status}). Share the sheet as Anyone with link can view.`);
   const text = await res.text();
-  if (text.trim().startsWith("<!")) throw new Error(`Tab "${tabName}" is not public or does not exist.`);
+  if (text.trim().startsWith("<!")) throw new Error(`Tab "${ref.label}" is not public or does not exist.`);
   return text;
 }
 
 export async function POST(request) {
   try {
-    const { sheetId, tabNames = [] } = await request.json();
+    const { sheetId, tabNames = [], gid, tab } = await request.json();
     if (!sheetId) return NextResponse.json({ error: "Missing sheetId" }, { status: 400 });
-    const tabs = Array.isArray(tabNames) && tabNames.length ? tabNames : ["Vault Import", "Vault Library"];
+    const incomingTabs = Array.isArray(tabNames) && tabNames.length ? tabNames : [];
+    if (tab) incomingTabs.unshift(tab);
+    if (gid) incomingTabs.unshift(`gid:${gid}`);
+    const tabs = incomingTabs.length ? [...new Set(incomingTabs.map((t) => String(t || "").trim()).filter(Boolean))] : ["Vault Import", "Vault Library"];
     const all = [];
     const errors = [];
     let skipped = 0;
