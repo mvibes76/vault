@@ -164,10 +164,20 @@ WebXR Lite now opens an Ambient Vault mode with shelf navigation, a media wall, 
 Desktop now includes a **VR Preview** button for testing the Ambient Vault interface without a headset. WebXR-capable devices still get the real **VR** entry. Press `Esc` twice to exit the VR preview.
 
 
-## v37 VR Media Wall
+## v38 VR Media Wall
 
 - VR Preview shows real media cards with thumbnails.
 - Wall/Cinema modes have richer previews.
 - Added controller calibration controls.
 - Trigger opens selected media in VR.
+- No Supabase schema changes.
+
+
+## v38 VR Stabilization
+
+- Room-locked WebXR media wall instead of head-locked clip-space UI.
+- Wall distance control for Quest viewing comfort.
+- Quest controller target-ray selection for shelves, media cards, and screen.
+- WebGL media card textures now attempt proxied thumbnails and direct image fallbacks.
+- DOM overlay fades back during immersive VR so the scene feels more VR-native.
 - No Supabase schema changes.
