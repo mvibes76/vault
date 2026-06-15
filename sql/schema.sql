@@ -177,3 +177,14 @@ alter table vault_covers add column if not exists cover_fit text default 'cover'
 alter table vault_covers add column if not exists cover_position_x int default 50;
 alter table vault_covers add column if not exists cover_position_y int default 50;
 create index if not exists idx_vault_items_cover_mode on vault_items(user_id, cover_mode);
+
+-- v24: gallery/folder showcase metadata. Safe to rerun.
+alter table vault_folders add column if not exists kind text default 'folder' check (kind in ('folder','gallery'));
+alter table vault_folders add column if not exists display_mode text default 'grid' check (display_mode in ('grid','slideshow','masonry'));
+alter table vault_folders add column if not exists cover text;
+alter table vault_folders add column if not exists note text;
+alter table vault_folders add column if not exists view_count int default 0;
+alter table vault_folders add column if not exists last_viewed_at timestamptz;
+alter table vault_folders add column if not exists updated_at timestamptz default now();
+create index if not exists idx_vault_folders_kind on vault_folders(user_id, kind);
+create index if not exists idx_vault_folders_last_viewed on vault_folders(user_id, last_viewed_at);

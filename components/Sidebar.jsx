@@ -45,7 +45,7 @@ function SectionLabel({ collapsed, children }) {
 }
 
 export default function Sidebar({
-  tabs, activeView, onNavigate, folders, onCreateFolder, onDeleteFolder, onRenameFolder,
+  tabs, activeView, onNavigate, folders, onCreateFolder, onCreateGallery, onDeleteFolder, onRenameFolder,
   counts, onSignOut, userEmail, collapsed, onToggleCollapse,
   mobile = false, open = true, onClose, onDropItemToFolder,
 }) {
@@ -169,9 +169,14 @@ export default function Sidebar({
               </button>
             </div>
           ) : (
-            <button onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "transparent", border: "none", color: T.text4, fontSize: 12, cursor: "pointer", width: "100%", textAlign: "left", borderRadius: 6 }}>
-              <Icon name="plus" size={12} /> New folder
-            </button>
+            <div>
+              <button onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "transparent", border: "none", color: T.text4, fontSize: 12, cursor: "pointer", width: "100%", textAlign: "left", borderRadius: 6 }}>
+                <Icon name="plus" size={12} /> New folder
+              </button>
+              <button onClick={onCreateGallery} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "transparent", border: "none", color: T.text4, fontSize: 12, cursor: "pointer", width: "100%", textAlign: "left", borderRadius: 6 }}>
+                <Icon name="showcase" size={12} /> New gallery
+              </button>
+            </div>
           )
         )}
 

@@ -44,11 +44,12 @@ function parseSheetRows(csv, tabName) {
   const headers = rows[0].map((h) => String(h || "").trim().toLowerCase().replace(/\s+/g, "_"));
   const urlIdx = headerIndex(headers, ["url", "link", "file", "file_url", "drive_link", "gdrive", "google_drive", "source_url"]);
   const titleIdx = headerIndex(headers, ["title", "name", "label", "file_name"]);
-  const folderIdx = headerIndex(headers, ["folder", "tab", "category", "collection", "section"]);
+  const folderIdx = headerIndex(headers, ["folder", "gallery", "gallery_name", "tab", "category", "collection", "section"]);
   const tagsIdx = headerIndex(headers, ["tags", "tag", "keywords"]);
   const noteIdx = headerIndex(headers, ["note", "notes", "description", "desc", "caption", "comment"]);
   const typeIdx = headerIndex(headers, ["type", "media_type"]);
   const sourceIdx = headerIndex(headers, ["source", "platform", "provider"]);
+  const folderKindIdx = headerIndex(headers, ["folder_kind", "folder_type", "bucket_type", "is_gallery"]);
   const thumbIdx = headerIndex(headers, ["thumbnail", "thumb", "image", "poster", "cover", "cover_url", "custom_cover"]);
   const coverModeIdx = headerIndex(headers, ["cover_mode", "cover_behavior", "use_original_cover"]);
   const coverFitIdx = headerIndex(headers, ["cover_fit", "cover_sizing", "sizing", "fit"]);
@@ -69,6 +70,8 @@ function parseSheetRows(csv, tabName) {
     const tags = clean(row, tagsIdx).split(/[,;]/).map((t) => t.trim()).filter(Boolean);
     const thumb = clean(row, thumbIdx);
     const rawCoverMode = clean(row, coverModeIdx).toLowerCase();
+    const rawFolderKind = clean(row, folderKindIdx).toLowerCase();
+    const folderKind = ["gallery", "yes", "true", "1"].includes(rawFolderKind) ? "gallery" : "folder";
     const coverMode = thumb ? "manual" : ["original", "source", "keep", "true", "yes", "1"].includes(rawCoverMode) ? "original" : "auto";
     const fit = clean(row, coverFitIdx).toLowerCase() === "contain" || clean(row, coverFitIdx).toLowerCase() === "fit" ? "contain" : "cover";
     const posX = Number(clean(row, coverXIdx));
@@ -79,6 +82,7 @@ function parseSheetRows(csv, tabName) {
       url,
       title,
       folder: folder === "Vault Library" || folder === "Vault Import" ? null : folder,
+      folder_kind: folderKind,
       tags,
       note: clean(row, noteIdx),
       type: clean(row, typeIdx) || "link",

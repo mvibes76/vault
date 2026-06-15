@@ -9,11 +9,11 @@ import QuickAddModal from "./QuickAddModal";
 import SheetImportModal from "./SheetImportModal";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
-import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule } from "@/lib/utils";
+import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule, proxiedMediaUrl, normalizeCoverUrl } from "@/lib/utils";
 import { SOURCE_OPTIONS } from "@/lib/sources";
 import {
   supabase, isSupabaseConfigured, getUserData, toggleFavorite,
-  setItemFolder, getFolders, createFolder, deleteFolder, renameFolder,
+  setItemFolder, getFolders, createFolder, deleteFolder, renameFolder, updateFolder, recordFolderView,
   getSettings, saveSettings, saveProgress,
   getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark, recordItemView,
   getCoverLibrary, upsertCover, deleteCover,
@@ -49,6 +49,8 @@ export default function Vault() {
   const [sortBy, setSortBy]       = useState("default");
   const [search, setSearch]       = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [folderMediaFilter, setFolderMediaFilter] = useState("all");
+  const [flatEverything, setFlatEverything] = useState(false);
 
   const [showSearch, setShowSearch]     = useState(false);
   const [showConfig, setShowConfig]     = useState(false);
@@ -210,6 +212,18 @@ export default function Vault() {
 
   const folderEquals = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
+  const mediaKindOf = useCallback((item) => {
+    const type = String(item?.type || "").toLowerCase();
+    const source = String(item?.source || sourceIdOf(item?.url || "")).toLowerCase();
+    const url = String(item?.url || "").split("?")[0].toLowerCase();
+    if (type.includes("image") || source === "image" || /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(url)) return "photo";
+    if (type.includes("pdf") || source === "pdf" || url.endsWith(".pdf")) return "pdf";
+    if (type.includes("video") || ["youtube","vimeo","drive","reddit","tiktok","twitch","hls","video","direct"].includes(source) || /\.(mp4|webm|mov|m4v|m3u8)$/i.test(url)) return "video";
+    return "link";
+  }, []);
+
+  const folderForItem = useCallback((item) => userData[item?.key]?.folder || item?.folder || null, [userData]);
+
   const applyCoverRules = useCallback((item) => {
     if (!item) return item;
 
@@ -254,6 +268,7 @@ export default function Vault() {
   }, [folders, canonicalFolderName]);
 
   const allItems = useMemo(() => quickAdds.map(applyCoverRules), [quickAdds, applyCoverRules]);
+  const itemsForFolder = useCallback((name, items = allItems) => items.filter((i) => folderEquals(folderForItem(i), name)), [allItems, folderForItem]);
 
   // ── User actions ──────────────────────────────────────────────────────────
   const handleToggleFavorite = async (key, current) => {
@@ -275,13 +290,13 @@ export default function Vault() {
       }).catch(() => {});
     }
   };
-  const handleCreateFolder = async (name) => {
+  const handleCreateFolder = async (name, options = {}) => {
     const cleaned = String(name || "").trim();
     if (!cleaned) return null;
     const existing = folders.find((f) => folderEquals(f.name, cleaned));
     if (existing) return existing.name;
-    setFolders((prev) => [...prev, { name: cleaned }].sort((a, b) => a.name.localeCompare(b.name)));
-    if (user) await createFolder(user.id, cleaned);
+    setFolders((prev) => [...prev, { name: cleaned, kind: options.kind || "folder", display_mode: options.display_mode || "grid", cover: options.cover || "", note: options.note || "" }].sort((a, b) => a.name.localeCompare(b.name)));
+    if (user) await createFolder(user.id, cleaned, options);
     return cleaned;
   };
   const handleDeleteFolder = async (name) => {
@@ -325,6 +340,29 @@ export default function Vault() {
     if (user) await renameFolder(user.id, from, target);
     const affectedItems = quickAdds.filter((i) => folderEquals(i.folder, from)).map((i) => ({ ...i, folder: target }));
     if (affectedItems.length) fetch("/api/sheets-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "bulk_upsert", items: affectedItems }) }).catch(() => {});
+  };
+
+  const handleUpdateFolderSettings = async (name, patch = {}) => {
+    const canonical = canonicalFolderName(name);
+    if (!canonical) return;
+    const nextName = String(patch.name || "").trim();
+    const metaPatch = { ...patch };
+    delete metaPatch.name;
+    if (nextName && !folderEquals(nextName, canonical)) {
+      await handleRenameFolder(canonical, nextName);
+      if (Object.keys(metaPatch).length && user) await updateFolder(user.id, nextName, metaPatch).catch(() => {});
+      setFolders((prev) => prev.map((f) => folderEquals(f.name, nextName) ? { ...f, ...metaPatch } : f));
+      return;
+    }
+    setFolders((prev) => prev.map((f) => folderEquals(f.name, canonical) ? { ...f, ...metaPatch } : f));
+    if (user) await updateFolder(user.id, canonical, metaPatch).catch(() => {});
+  };
+
+  const handleCreateGallery = async () => {
+    const name = window.prompt("Gallery name");
+    if (!name?.trim()) return;
+    await handleCreateFolder(name.trim(), { kind: "gallery", display_mode: "grid" });
+    setActiveView(`folder:${canonicalFolderName(name.trim()) || name.trim()}`);
   };
 
   const handleSaveCoverRules = async (rules) => {
@@ -405,13 +443,20 @@ export default function Vault() {
       if (!existingByLower.has(lower)) newFolderByLower.set(lower, resolved);
       return { ...item, folder: resolved };
     });
-    const folderNames = [...new Set(cleanItems.map((i) => i.folder).filter(Boolean))];
+    const folderMeta = new Map();
+    cleanItems.forEach((i) => {
+      if (!i.folder) return;
+      const lower = String(i.folder).trim().toLowerCase();
+      const current = folderMeta.get(lower) || { name: i.folder, kind: "folder" };
+      if (i.folder_kind === "gallery") current.kind = "gallery";
+      folderMeta.set(lower, current);
+    });
     const existingFolderNamesLower = new Set(folders.map((f) => String(f.name || "").trim().toLowerCase()));
-    const newFolders = folderNames.filter((name) => !existingFolderNamesLower.has(String(name || "").trim().toLowerCase()));
+    const newFolders = [...folderMeta.values()].filter((f) => !existingFolderNamesLower.has(String(f.name || "").trim().toLowerCase()));
 
     if (newFolders.length) {
-      setFolders((prev) => [...prev, ...newFolders.map((name) => ({ name }))].sort((a, b) => a.name.localeCompare(b.name)));
-      if (user) await Promise.all(newFolders.map((name) => createFolder(user.id, name).catch(() => {})));
+      setFolders((prev) => [...prev, ...newFolders.map((f) => ({ name: f.name, kind: f.kind || "folder", display_mode: f.kind === "gallery" ? "slideshow" : "grid" }))].sort((a, b) => a.name.localeCompare(b.name)));
+      if (user) await Promise.all(newFolders.map((f) => createFolder(user.id, f.name, { kind: f.kind || "folder", display_mode: f.kind === "gallery" ? "slideshow" : "grid" }).catch(() => {})));
     }
 
     setQuickAdds((prev) => {
@@ -476,9 +521,10 @@ export default function Vault() {
     else if (activeView === "continue") items = items.filter((i) => { const d = userData[i.key]; return d?.progress > 5 && d?.duration > 0 && d.progress / d.duration < 0.95; });
     else if (activeView === "rated") items = items.filter((i) => userData[i.key]?.rating);
     else if (activeView.startsWith("tab:")) items = items.filter((i) => (userData[i.key]?.folder || i.folder) === activeView.slice(4));
-    else if (activeView.startsWith("folder:")) items = items.filter((i) => (userData[i.key]?.folder || i.folder) === activeView.slice(7));
+    else if (activeView.startsWith("folder:")) items = items.filter((i) => folderEquals(folderForItem(i), activeView.slice(7)));
 
     if (sourceFilter !== "all") items = items.filter((i) => (i.source || sourceIdOf(i.url)) === sourceFilter);
+    if (activeView.startsWith("folder:") && folderMediaFilter !== "all") items = items.filter((i) => mediaKindOf(i) === folderMediaFilter);
 
     if (search) {
       const q = search.toLowerCase();
@@ -491,7 +537,7 @@ export default function Vault() {
     }
     if (activeView !== "continue") items = sortItems(items);
     return items;
-  }, [allItems, activeView, sourceFilter, search, userData, sortItems]);
+  }, [allItems, activeView, sourceFilter, search, userData, sortItems, folderForItem, folderMediaFilter, mediaKindOf]);
 
   // ── Open item + view tracking ─────────────────────────────────────────────
   const openItem = useCallback((item) => {
@@ -522,7 +568,7 @@ export default function Vault() {
     continue:  allItems.filter((i) => { const d = userData[i.key]; return d?.progress > 5 && d?.duration > 0 && d.progress / d.duration < 0.95; }).length,
     rated:     allItems.filter((i) => userData[i.key]?.rating).length,
   };
-  folders.forEach((f) => { counts[`folder:${f.name}`] = allItems.filter((i) => (userData[i.key]?.folder || i.folder) === f.name).length; });
+  folders.forEach((f) => { counts[`folder:${f.name}`] = itemsForFolder(f.name).length; });
 
   // ── Source filter pills (only show sources actually present in current set) ─
   const sourcesPresent = useMemo(() => {
@@ -547,6 +593,15 @@ export default function Vault() {
     activeView === "favorites" ? "favorites" :
     activeView === "continue"  ? "continue" :
     showSearch                 ? "search"   : "all";
+
+  useEffect(() => {
+    if (!activeView.startsWith("folder:")) return;
+    const name = activeView.slice(7);
+    const now = new Date().toISOString();
+    setFolders((prev) => prev.map((f) => folderEquals(f.name, name) ? { ...f, last_viewed_at: now, view_count: Number(f.view_count || 0) + 1 } : f));
+    if (user) recordFolderView(user.id, name).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, user?.id]);
 
   const handleInstall = async () => {
     if (!installPrompt) return;
@@ -588,6 +643,20 @@ export default function Vault() {
     .sort((a, b) => new Date(b.addedAt || b.updatedAt || 0) - new Date(a.addedAt || a.updatedAt || 0))
     .slice(0, 8), [allItems]);
   const totalViews = useMemo(() => allItems.reduce((sum, i) => sum + Number(userData[i.key]?.view_count || 0), 0), [allItems, userData]);
+  const folderCards = useMemo(() => folders.map((folder) => {
+    const items = itemsForFolder(folder.name);
+    const coverItem = items.find((i) => i.thumbnail) || items[0];
+    return { folder, items, count: items.length, coverItem };
+  }).filter((g) => g.count > 0 || g.folder.kind === "gallery"), [folders, itemsForFolder]);
+  const recentGalleries = useMemo(() => [...folderCards]
+    .filter((g) => g.folder.last_viewed_at)
+    .sort((a, b) => new Date(b.folder.last_viewed_at || 0) - new Date(a.folder.last_viewed_at || 0))
+    .slice(0, 6), [folderCards]);
+  const activeFolder = activeView.startsWith("folder:") ? folders.find((f) => folderEquals(f.name, activeView.slice(7))) : null;
+  const activeFolderItemsAll = activeFolder ? itemsForFolder(activeFolder.name) : [];
+  const activeFolderKinds = activeFolder ? ["all", ...[...new Set(activeFolderItemsAll.map(mediaKindOf))].filter(Boolean)] : ["all"];
+  const showOrganizerOnly = activeView === "all" && folderCards.length > 0 && !flatEverything && !search && sourceFilter === "all";
+  const showFolderSlideshow = !!activeFolder && activeFolder.display_mode === "slideshow" && viewItems.length > 0 && viewMode !== "list";
 
   const cardProps = {
     userData,
@@ -608,7 +677,7 @@ export default function Vault() {
       <Sidebar
         tabs={[]}
         activeView={activeView} onNavigate={navigate}
-        folders={folders} onCreateFolder={handleCreateFolder} onDeleteFolder={handleDeleteFolder} onRenameFolder={handleRenameFolder} onDropItemToFolder={handleAssignFolder}
+        folders={folders} onCreateFolder={handleCreateFolder} onCreateGallery={handleCreateGallery} onDeleteFolder={handleDeleteFolder} onRenameFolder={handleRenameFolder} onDropItemToFolder={handleAssignFolder}
         counts={counts}
         onSignOut={isSupabaseConfigured() ? handleSignOut : null} userEmail={user?.email}
         collapsed={isMobile ? false : sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -671,6 +740,8 @@ export default function Vault() {
               isMobile={isMobile}
               allItems={allItems}
               folders={folders}
+              folderCards={folderCards}
+              recentGalleries={recentGalleries}
               totalViews={totalViews}
               continueItems={continueItems}
               recentlyViewed={recentlyViewed}
@@ -681,10 +752,43 @@ export default function Vault() {
               onNavigate={navigate}
               onQuickAdd={() => setShowQuickAdd(true)}
               onImport={() => setShowImport(true)}
+              onCreateGallery={handleCreateGallery}
               cardProps={cardProps}
             />
           )}
-          {activeView !== "home" && !sheetId && !loading && !quickAdds.length && (
+
+          {!loading && activeView === "all" && folderCards.length > 0 && (
+            <OrganizerStrip
+              isMobile={isMobile}
+              flatEverything={flatEverything}
+              onToggleFlat={() => setFlatEverything((v) => !v)}
+              galleries={folderCards}
+              onOpenGallery={(name) => navigate(`folder:${name}`)}
+              onCreateGallery={handleCreateGallery}
+            />
+          )}
+
+          {!loading && showOrganizerOnly && (
+            <GalleryGrid
+              galleries={folderCards}
+              onOpenGallery={(name) => navigate(`folder:${name}`)}
+              isMobile={isMobile}
+            />
+          )}
+
+          {!loading && activeFolder && (
+            <FolderHeader
+              folder={activeFolder}
+              count={activeFolderItemsAll.length}
+              filters={activeFolderKinds}
+              mediaFilter={folderMediaFilter}
+              onMediaFilter={setFolderMediaFilter}
+              onOpenFirst={() => viewItems[0] && openItem(viewItems[0])}
+              onUpdate={(patch) => handleUpdateFolderSettings(activeFolder.name, patch)}
+              isMobile={isMobile}
+            />
+          )}
+          {activeView !== "home" && !showOrganizerOnly && !sheetId && !loading && !quickAdds.length && (
             <EmptyState
               icon="inbox"
               title="Empty vault"
@@ -695,11 +799,15 @@ export default function Vault() {
           )}
           {loading && <Spinner />}
           {error && !loading && <ErrorBox msg={error} />}
-          {activeView !== "home" && !loading && viewItems.length === 0 && !error && (sheetId || quickAdds.length) && (
+          {activeView !== "home" && !showOrganizerOnly && !loading && viewItems.length === 0 && !error && (sheetId || quickAdds.length) && (
             <EmptyState icon="inbox" title="Nothing here" sub={search ? `No results for "${search}"` : "No items in this view."} />
           )}
 
-          {activeView !== "home" && !loading && viewItems.length > 0 && viewMode !== "list" && (
+          {showFolderSlideshow && !loading && (
+            <SlideshowGallery items={viewItems} onOpen={openItem} cardProps={cardProps} />
+          )}
+
+          {activeView !== "home" && !showOrganizerOnly && !showFolderSlideshow && !loading && viewItems.length > 0 && viewMode !== "list" && (
             <div style={gridStyle}>
               {viewItems.map((item) => (
                 <Card key={item.id || item.key} item={item} onOpen={openItem}
@@ -709,7 +817,7 @@ export default function Vault() {
             </div>
           )}
 
-          {activeView !== "home" && !loading && viewItems.length > 0 && viewMode === "list" && (
+          {activeView !== "home" && !showOrganizerOnly && !showFolderSlideshow && !loading && viewItems.length > 0 && viewMode === "list" && (
             <div style={{ border: `1px solid ${T.border}`, borderRadius: T.r10, overflow: "hidden" }}>
               {viewItems.map((item) => (
                 <Card key={item.id || item.key} item={item} onOpen={openItem} viewMode="list" {...cardProps} />
@@ -753,7 +861,129 @@ export default function Vault() {
 }
 
 
-function Dashboard({ isMobile, allItems, folders, totalViews, continueItems, recentlyViewed, recentlyAdded, topRatedItems, userData, onOpen, onNavigate, onQuickAdd, onImport, cardProps }) {
+function OrganizerStrip({ isMobile, flatEverything, onToggleFlat, galleries, onOpenGallery, onCreateGallery }) {
+  return (
+    <div style={{ marginBottom: 16, display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", gap: 10, flexDirection: isMobile ? "column" : "row" }}>
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.6, color: T.text1 }}>{flatEverything ? "Everything" : "Galleries"}</div>
+        <div style={{ fontSize: 12, color: T.text4, marginTop: 3 }}>{flatEverything ? "All saved media shown as one flat wall." : `${galleries.length} organized buckets. Open one to view the actual gallery.`}</div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={onToggleFlat} style={flatEverything ? dashPrimary : dashSecondary}>{flatEverything ? "Organize" : "Show flat"}</button>
+        <button onClick={onCreateGallery} style={dashSecondary}>New gallery</button>
+      </div>
+    </div>
+  );
+}
+
+function GalleryGrid({ galleries, onOpenGallery, isMobile }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(auto-fill,minmax(240px,1fr))", gap: isMobile ? 10 : 16 }}>
+      {galleries.map((g) => <GalleryCard key={g.folder.name} gallery={g} onOpen={() => onOpenGallery(g.folder.name)} />)}
+    </div>
+  );
+}
+
+function GalleryCard({ gallery, onOpen, compact = false }) {
+  const { folder, items, count, coverItem } = gallery;
+  const explicit = folder.cover ? proxiedMediaUrl(normalizeCoverUrl(folder.cover)) : "";
+  const itemThumb = coverItem?.thumbnail ? proxiedMediaUrl(normalizeCoverUrl(coverItem.thumbnail)) : "";
+  const src = explicit || itemThumb;
+  const videoCount = items.filter((i) => String(i.type || i.source || "").toLowerCase().includes("video") || ["youtube","vimeo","drive","reddit","tiktok","hls"].includes(sourceIdOf(i.url))).length;
+  const photoCount = items.filter((i) => String(i.type || i.source || "").toLowerCase().includes("image") || /\.(jpg|jpeg|png|webp|gif|avif)(\?|$)/i.test(i.url || "")).length;
+  return (
+    <button onClick={onOpen} style={{ textAlign: "left", border: `1px solid ${T.border}`, borderRadius: 18, overflow: "hidden", background: "linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025))", color: T.text1, cursor: "pointer", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", padding: 0 }}>
+      <div style={{ aspectRatio: compact ? "16/10" : "4/5", position: "relative", background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
+        {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} /> : (
+          <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: T.text4 }}><Icon name="showcase" size={42} /></div>
+        )}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.68))" }} />
+        <div style={{ position: "absolute", left: 12, right: 12, bottom: 12 }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", borderRadius: 999, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.12)", color: T.text2, fontSize: 10, marginBottom: 8 }}>
+            <Icon name={folder.kind === "gallery" ? "showcase" : "folder"} size={11} /> {folder.kind === "gallery" ? "Gallery" : "Folder"}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: -0.4, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{folder.name}</div>
+          <div style={{ marginTop: 5, fontSize: 11, color: T.text3 }}>{count} items{videoCount ? ` · ${videoCount} video` : ""}{photoCount ? ` · ${photoCount} photo` : ""}</div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+
+function SlideshowGallery({ items, onOpen, cardProps }) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { if (idx >= items.length) setIdx(0); }, [items.length, idx]);
+  const item = items[idx] || items[0];
+  if (!item) return null;
+  const src = item.thumbnail ? proxiedMediaUrl(normalizeCoverUrl(item.thumbnail)) : "";
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <button onClick={() => onOpen(item)} style={{ minHeight: 340, border: `1px solid ${T.border}`, borderRadius: 22, overflow: "hidden", background: "rgba(255,255,255,0.035)", color: T.text1, cursor: "pointer", position: "relative", padding: 0, textAlign: "left" }}>
+        {src ? <img src={src} alt="" style={{ width: "100%", height: "min(62dvh,620px)", objectFit: "contain", background: "#050505", display: "block" }} /> : <div style={{ height: "min(62dvh,620px)", display: "grid", placeItems: "center", color: T.text4 }}><Icon name="showcase" size={54} /></div>}
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 16, background: "linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.74))" }}>
+          <div style={{ fontSize: 12, color: T.text4, marginBottom: 4 }}>{idx + 1} / {items.length}</div>
+          <div style={{ fontSize: 18, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title || item.url}</div>
+        </div>
+      </button>
+      <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(95px,130px)", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+        {items.map((thumb, i) => (
+          <div key={thumb.key} style={{ border: `1px solid ${i === idx ? T.borderHov : T.border}`, borderRadius: 14, overflow: "hidden" }}>
+            <Card item={thumb} onOpen={() => setIdx(i)} viewMode="compact" {...cardProps} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FolderHeader({ folder, count, filters, mediaFilter, onMediaFilter, onOpenFirst, onUpdate, isMobile }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(folder.name || "");
+  const [cover, setCover] = useState(folder.cover || "");
+  const [note, setNote] = useState(folder.note || "");
+  useEffect(() => { setName(folder.name || ""); setCover(folder.cover || ""); setNote(folder.note || ""); }, [folder.name, folder.cover, folder.note]);
+  const isGallery = folder.kind === "gallery";
+  return (
+    <div style={{ marginBottom: 16, border: `1px solid ${T.border}`, borderRadius: 20, padding: isMobile ? 14 : 18, background: isGallery ? "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.025))" : "rgba(255,255,255,0.035)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ padding: "3px 8px", border: `1px solid ${T.border}`, borderRadius: 999, color: T.text3, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>{isGallery ? "Gallery" : "Folder"}</span>
+            <span style={{ fontSize: 11, color: T.text4 }}>{count} items</span>
+          </div>
+          <div style={{ fontSize: isMobile ? 24 : 32, fontWeight: 850, color: T.text1, letterSpacing: -1.1, lineHeight: 1.05 }}>{folder.name}</div>
+          {folder.note && <div style={{ marginTop: 7, color: T.text4, fontSize: 12, maxWidth: 680 }}>{folder.note}</div>}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {count > 0 && <button onClick={onOpenFirst} style={dashPrimary}>{folder.display_mode === "slideshow" ? "Start slideshow" : "Open first"}</button>}
+          <button onClick={() => onUpdate({ kind: isGallery ? "folder" : "gallery" })} style={dashSecondary}>{isGallery ? "Make folder" : "Make gallery"}</button>
+          <button onClick={() => onUpdate({ display_mode: folder.display_mode === "slideshow" ? "grid" : "slideshow" })} style={dashSecondary}>{folder.display_mode === "slideshow" ? "Grid" : "Slideshow"}</button>
+          <button onClick={() => setEditing((v) => !v)} style={dashSecondary}>Edit</button>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 14, paddingBottom: 2 }}>
+        {filters.map((f) => <Pill key={f} active={mediaFilter === f} onClick={() => onMediaFilter(f)}>{f === "all" ? "All media" : f}</Pill>)}
+      </div>
+      {editing && (
+        <div style={{ marginTop: 14, display: "grid", gap: 9, maxWidth: 720 }}>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Gallery name" style={settingsInput} />
+          <input value={cover} onChange={(e) => setCover(e.target.value)} placeholder="Gallery cover URL or Drive image link" style={settingsInput} />
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Gallery note" rows={3} style={{ ...settingsInput, resize: "vertical" }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { onUpdate({ name: name.trim() || folder.name, cover: cover.trim() || null, note: note.trim() || null }); setEditing(false); }} style={dashPrimary}>Save</button>
+            <button onClick={() => setEditing(false)} style={dashSecondary}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const settingsInput = { width: "100%", padding: "10px 12px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" };
+
+
+function Dashboard({ isMobile, allItems, folders, folderCards, recentGalleries, totalViews, continueItems, recentlyViewed, recentlyAdded, topRatedItems, userData, onOpen, onNavigate, onQuickAdd, onImport, onCreateGallery, cardProps }) {
   const cardMode = isMobile ? "grid" : "grid";
   const primary = continueItems[0] || recentlyViewed[0] || recentlyAdded[0] || null;
   const compactStats = `${allItems.length} saved · ${folders.length} folders · ${totalViews} views`;
@@ -785,10 +1015,30 @@ function Dashboard({ isMobile, allItems, folders, totalViews, continueItems, rec
         )}
       </div>
 
+      <GalleryDashboardRow title="Recent Galleries" empty="Open a gallery and it will appear here." galleries={(recentGalleries.length ? recentGalleries : folderCards).slice(0, 6)} onOpenGallery={(name) => onNavigate(`folder:${name}`)} onCreateGallery={onCreateGallery} />
       <DashboardRow title="Continue Watching" empty="No active videos yet." items={continueItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("continue")} />
-      <DashboardRow title="Recently Added" empty="Your newest saves appear here." items={recentlyAdded.slice(0, 8)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
-      {topRatedItems.length > 0 && <DashboardRow title="Top Rated" empty="" items={topRatedItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("rated")} />}
+      {topRatedItems.length > 0 && <DashboardRow title="Rated Media" empty="" items={topRatedItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("rated")} />}
+      <DashboardRow title="Recently Added" empty="Your newest saves appear here." items={recentlyAdded.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
     </div>
+  );
+}
+
+
+function GalleryDashboardRow({ title, empty, galleries, onOpenGallery, onCreateGallery }) {
+  return (
+    <section>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+        <h2 style={{ margin: 0, fontSize: 15, color: T.text1, letterSpacing: -0.2 }}>{title}</h2>
+        <button onClick={onCreateGallery} style={{ background: "transparent", border: "none", color: T.text4, fontSize: 12, cursor: "pointer" }}>New gallery</button>
+      </div>
+      {galleries.length ? (
+        <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(170px, 240px)", gap: 12, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
+          {galleries.map((g) => <GalleryCard key={g.folder.name} gallery={g} onOpen={() => onOpenGallery(g.folder.name)} compact />)}
+        </div>
+      ) : (
+        <div style={{ border: `1px dashed ${T.border}`, borderRadius: 14, padding: "18px 14px", color: T.text4, fontSize: 12, background: "rgba(255,255,255,0.025)" }}>{empty}</div>
+      )}
+    </section>
   );
 }
 
