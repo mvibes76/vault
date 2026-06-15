@@ -104,3 +104,8 @@ Run `sql/schema.sql` after deploying. v23 adds per-item cover behavior, crop/siz
 Folders can now act as galleries. A gallery can have its own cover, note, display mode, and recently viewed state. The Everything view can show organized gallery cards or a flat wall of all media. Folder views include media filters and a slideshow mode.
 
 Run `sql/schema.sql` after deploying v24.
+
+
+## v25
+
+Adds nested gallery buckets inside folders, folder expand-all mode, bulk selection actions, and the lightweight Vault Oil interaction in the media player. Run `sql/schema.sql` again to add `vault_folders.parent_folder`.

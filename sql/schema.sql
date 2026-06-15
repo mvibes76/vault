@@ -188,3 +188,7 @@ alter table vault_folders add column if not exists last_viewed_at timestamptz;
 alter table vault_folders add column if not exists updated_at timestamptz default now();
 create index if not exists idx_vault_folders_kind on vault_folders(user_id, kind);
 create index if not exists idx_vault_folders_last_viewed on vault_folders(user_id, last_viewed_at);
+
+-- v25: nested gallery buckets and bulk organization. Safe to rerun.
+alter table vault_folders add column if not exists parent_folder text;
+create index if not exists idx_vault_folders_parent on vault_folders(user_id, parent_folder);

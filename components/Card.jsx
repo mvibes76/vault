@@ -124,6 +124,12 @@ export default function Card({
           {meta.id === "extract" && <span style={{ opacity: 0.7 }}>·?</span>}
         </div>
 
+        {onSelect && (
+          <div style={{ position: "absolute", top: 8, right: onSelect ? 40 : 8, width: 26, height: 26, borderRadius: 8, background: selected ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.56)", border: "1px solid rgba(255,255,255,0.22)", display: "grid", placeItems: "center", color: selected ? "#000" : T.text1, fontSize: 14, fontWeight: 900, backdropFilter: "blur(8px)" }}>
+            {selected ? "✓" : ""}
+          </div>
+        )}
+
         {rating > 0 && (
           <div style={{ position: "absolute", bottom: 8, left: 8, padding: "3px 7px", borderRadius: 999, background: "rgba(0,0,0,0.62)", border: "1px solid rgba(255,255,255,0.12)", color: T.amber, fontSize: 10, fontWeight: 700, backdropFilter: "blur(8px)" }}>★ {rating}</div>
         )}
