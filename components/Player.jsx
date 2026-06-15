@@ -59,7 +59,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [markNotice, setMarkNotice] = useState("");
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [driveFallback, setDriveFallback] = useState(false);
-  const [oilBursts, setOilBursts] = useState([]);
+
   const backdropTap = useRef(0);
 
   // Extraction state (used when source.id === "extract")
@@ -427,42 +427,268 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     markNoticeTimer.current = setTimeout(() => setMarkNotice(""), 1800);
   };
 
+  const splashCanvasRef = useRef(null);
+  const splashAnimRef   = useRef(null);
+
   const triggerOil = useCallback((e) => {
     e?.stopPropagation?.();
-    const id = Date.now() + Math.random();
-    // Each burst gets randomised per-stream offsets so no two shots look identical
-    const burst = {
-      id,
-      seed: Math.random(),
-      yOff: Math.round((Math.random() - 0.5) * 28),
-      angle: -4 + Math.random() * 8,
-      streams: Array.from({ length: 3 + Math.floor(Math.random() * 2) }, (_, i) => ({
-        key: i,
-        yOff: Math.round((Math.random() - 0.5) * 36),
-        thickness: 7 + Math.random() * 11,
-        delay: i * 55 + Math.random() * 40,
-        speed: 0.62 + Math.random() * 0.22,
-        length: 0.52 + Math.random() * 0.34,
-      })),
-      droplets: Array.from({ length: 6 + Math.floor(Math.random() * 5) }, (_, i) => ({
-        key: i,
-        x: 12 + Math.random() * 72,
-        y: 20 + Math.random() * 55,
-        size: 4 + Math.random() * 10,
-        delay: 180 + Math.random() * 160,
-      })),
-      drips: Array.from({ length: 3 + Math.floor(Math.random() * 3) }, (_, i) => ({
-        key: i,
-        x: 8 + Math.random() * 80,
-        y: 45 + Math.random() * 25,
-        width: 3 + Math.random() * 6,
-        delay: 280 + i * 80 + Math.random() * 120,
-        speed: 0.9 + Math.random() * 0.7,
-      })),
-    };
-    setOilBursts((prev) => [...prev.slice(-2), burst]);
     onOil?.();
-    setTimeout(() => setOilBursts((prev) => prev.filter((b) => b.id !== id)), 2200);
+
+    const canvas = splashCanvasRef.current;
+    if (!canvas) return;
+    const W = canvas.width  = window.innerWidth;
+    const H = canvas.height = window.innerHeight;
+    const ctx = canvas.getContext("2d");
+
+    // Cancel any running animation
+    if (splashAnimRef.current) cancelAnimationFrame(splashAnimRef.current);
+
+    // ── Generate particles ──────────────────────────────────────────────────
+    // Origin: roughly where the oil button sits (bottom-right)
+    const ox = W - 80;
+    const oy = H - 80;
+
+    // Main arcing streams — thick ropes of fluid
+    const streams = Array.from({ length: 5 + Math.floor(Math.random() * 4) }, () => {
+      const angle = Math.PI + (Math.random() - 0.5) * 1.1;  // leftward arc
+      const speed = 18 + Math.random() * 22;
+      return {
+        x: ox, y: oy,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - (6 + Math.random() * 8), // upward bias
+        life: 1,
+        decay: 0.012 + Math.random() * 0.01,
+        width: 6 + Math.random() * 14,
+        wobble: (Math.random() - 0.5) * 0.04,
+        trail: [],
+      };
+    });
+
+    // Splatter micro-droplets — scatter all over screen
+    const droplets = Array.from({ length: 60 + Math.floor(Math.random() * 40) }, () => {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 4 + Math.random() * 28;
+      return {
+        x: ox + (Math.random() - 0.5) * 40,
+        y: oy + (Math.random() - 0.5) * 40,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - (Math.random() * 12),
+        r: 1.5 + Math.random() * 7,
+        life: 0.7 + Math.random() * 0.3,
+        decay: 0.008 + Math.random() * 0.018,
+        gravity: 0.18 + Math.random() * 0.22,
+        splat: false,
+        splatY: 0,
+        splatR: 0,
+      };
+    });
+
+    // Central impact blob — the big mass that lands on screen
+    const blob = {
+      x: ox - (180 + Math.random() * 220),
+      y: oy - (60 + Math.random() * 80),
+      r: 0,
+      targetR: 55 + Math.random() * 45,
+      life: 1,
+      decay: 0.006,
+      arms: Array.from({ length: 8 + Math.floor(Math.random() * 6) }, () => ({
+        angle: Math.random() * Math.PI * 2,
+        len: 30 + Math.random() * 90,
+        width: 3 + Math.random() * 10,
+        tip: 1 + Math.random() * 4,
+        curve: (Math.random() - 0.5) * 0.9,
+      })),
+      drips: Array.from({ length: 4 + Math.floor(Math.random() * 5) }, () => ({
+        angle: Math.PI * 0.3 + Math.random() * Math.PI * 1.4, // downward range
+        x: 0, y: 0,
+        len: 0,
+        targetLen: 40 + Math.random() * 120,
+        speed: 0.6 + Math.random() * 1.2,
+        width: 2 + Math.random() * 6,
+        beaded: Math.random() > 0.4,
+      })),
+      born: performance.now(),
+    };
+
+    const startTime = performance.now();
+
+    function draw(now) {
+      const elapsed = now - startTime;
+      ctx.clearRect(0, 0, W, H);
+
+      // ── Draw streams ───────────────────────────────────────────────────────
+      streams.forEach((s) => {
+        if (s.life <= 0) return;
+        s.trail.push({ x: s.x, y: s.y, w: s.width * s.life });
+        if (s.trail.length > 28) s.trail.shift();
+
+        s.vx += s.wobble;
+        s.vy += 0.55; // gravity
+        s.x  += s.vx;
+        s.y  += s.vy;
+        s.life -= s.decay;
+
+        if (s.trail.length > 2) {
+          ctx.beginPath();
+          ctx.moveTo(s.trail[0].x, s.trail[0].y);
+          for (let i = 1; i < s.trail.length; i++) {
+            const t = s.trail[i];
+            ctx.lineTo(t.x, t.y);
+          }
+          ctx.strokeStyle = `rgba(255,255,255,${Math.max(0, s.life * 0.95)})`;
+          ctx.lineWidth   = Math.max(0.5, s.width * s.life);
+          ctx.lineCap     = "round";
+          ctx.lineJoin    = "round";
+          ctx.shadowColor = "rgba(255,255,255,0.6)";
+          ctx.shadowBlur  = 8;
+          ctx.stroke();
+          ctx.shadowBlur  = 0;
+        }
+      });
+
+      // ── Draw droplets ──────────────────────────────────────────────────────
+      droplets.forEach((d) => {
+        if (d.life <= 0) return;
+        if (!d.splat) {
+          d.vy += d.gravity;
+          d.x  += d.vx * 0.96;
+          d.y  += d.vy;
+          d.vx *= 0.98;
+          d.life -= d.decay;
+
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, Math.max(0.3, d.r * d.life), 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${Math.min(1, d.life * 1.1)})`;
+          ctx.shadowColor = "rgba(255,255,255,0.5)";
+          ctx.shadowBlur  = 4;
+          ctx.fill();
+          ctx.shadowBlur  = 0;
+
+          // Splat when hitting bottom or edges
+          if (d.y > H * 0.88 || d.x < 10 || d.x > W - 10) {
+            d.splat  = true;
+            d.splatY = d.y;
+            d.splatR = d.r * (2 + Math.random() * 3);
+          }
+        } else {
+          // Splat puddle
+          d.life -= 0.005;
+          const alpha = Math.max(0, d.life * 0.7);
+          ctx.beginPath();
+          ctx.ellipse(d.x, d.splatY, d.splatR * 1.8, d.splatR * 0.4, 0, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+          ctx.fill();
+        }
+      });
+
+      // ── Draw central blob ──────────────────────────────────────────────────
+      if (blob.life > 0) {
+        const age = (now - blob.born) / 1000;
+        blob.r = Math.min(blob.targetR, blob.r + (blob.targetR - blob.r) * 0.18);
+        blob.life -= blob.decay;
+        const alpha = Math.min(1, blob.life * 1.3);
+
+        // Core blob with radial gradient for 3D feel
+        const grd = ctx.createRadialGradient(
+          blob.x - blob.r * 0.28, blob.y - blob.r * 0.28, blob.r * 0.05,
+          blob.x, blob.y, blob.r * 1.1
+        );
+        grd.addColorStop(0,   `rgba(255,255,255,${alpha})`);
+        grd.addColorStop(0.5, `rgba(240,240,250,${alpha * 0.92})`);
+        grd.addColorStop(1,   `rgba(200,210,230,${alpha * 0.4})`);
+
+        ctx.beginPath();
+        ctx.arc(blob.x, blob.y, blob.r, 0, Math.PI * 2);
+        ctx.fillStyle = grd;
+        ctx.shadowColor = "rgba(255,255,255,0.7)";
+        ctx.shadowBlur  = 22;
+        ctx.fill();
+        ctx.shadowBlur  = 0;
+
+        // Arms / tendrils shooting out
+        blob.arms.forEach((arm) => {
+          const ax = blob.x + Math.cos(arm.angle + age * arm.curve) * blob.r * 0.7;
+          const ay = blob.y + Math.sin(arm.angle + age * arm.curve) * blob.r * 0.7;
+          const ex = blob.x + Math.cos(arm.angle + age * arm.curve) * (blob.r + arm.len * Math.min(1, age * 2.2));
+          const ey = blob.y + Math.sin(arm.angle + age * arm.curve) * (blob.r + arm.len * Math.min(1, age * 2.2));
+
+          const gr = ctx.createLinearGradient(ax, ay, ex, ey);
+          gr.addColorStop(0,   `rgba(255,255,255,${alpha * 0.95})`);
+          gr.addColorStop(0.7, `rgba(255,255,255,${alpha * 0.6})`);
+          gr.addColorStop(1,   `rgba(255,255,255,0)`);
+
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(ex, ey);
+          ctx.strokeStyle = gr;
+          ctx.lineWidth   = arm.width * Math.max(0, 1 - age * 0.5);
+          ctx.lineCap     = "round";
+          ctx.shadowColor = "rgba(255,255,255,0.4)";
+          ctx.shadowBlur  = 6;
+          ctx.stroke();
+          ctx.shadowBlur  = 0;
+
+          // Tip droplet
+          if (age > 0.3) {
+            ctx.beginPath();
+            ctx.arc(ex, ey, arm.tip * Math.max(0, blob.life), 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,255,255,${alpha * 0.85})`;
+            ctx.fill();
+          }
+        });
+
+        // Drips hanging downward
+        blob.drips.forEach((dr) => {
+          dr.len = Math.min(dr.targetLen, dr.len + dr.speed * (1 + age));
+          const startX = blob.x + Math.cos(dr.angle) * blob.r * 0.6;
+          const startY = blob.y + Math.sin(dr.angle) * blob.r * 0.6;
+          const endX   = startX + Math.cos(dr.angle) * dr.len * 0.25;
+          const endY   = startY + dr.len; // gravity pulls straight down
+
+          const dg = ctx.createLinearGradient(startX, startY, endX, endY);
+          dg.addColorStop(0,    `rgba(255,255,255,${alpha * 0.9})`);
+          dg.addColorStop(0.65, `rgba(255,255,255,${alpha * 0.55})`);
+          dg.addColorStop(1,    `rgba(255,255,255,0)`);
+
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          if (dr.beaded) {
+            // Beaded drip — series of blobs
+            const steps = Math.floor(dr.len / 14);
+            for (let i = 1; i <= steps; i++) {
+              const t  = i / Math.max(1, steps);
+              const bx = startX + (endX - startX) * t;
+              const by = startY + (endY - startY) * t;
+              const br = (dr.width * 0.5) * (1 - t * 0.5) * alpha;
+              ctx.beginPath();
+              ctx.arc(bx, by, Math.max(0.2, br), 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(255,255,255,${alpha * (1 - t * 0.7)})`;
+              ctx.fill();
+            }
+          } else {
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.strokeStyle = dg;
+            ctx.lineWidth   = dr.width * alpha;
+            ctx.lineCap     = "round";
+            ctx.stroke();
+          }
+        });
+      }
+
+      // Keep running until everything fades
+      const anyAlive = blob.life > 0
+        || streams.some((s) => s.life > 0)
+        || droplets.some((d) => d.life > 0);
+
+      if (anyAlive) {
+        splashAnimRef.current = requestAnimationFrame(draw);
+      } else {
+        ctx.clearRect(0, 0, W, H);
+      }
+    }
+
+    splashAnimRef.current = requestAnimationFrame(draw);
   }, [onOil]);
 
   const openPopout = useCallback(() => {
@@ -705,29 +931,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <button onClick={handleClose} style={ctrlBtn} title="Close"><Icon name="x" size={15} /></button>
       </div>
       {markNotice && <div style={markToast}>{markNotice}</div>}
-      <style jsx global>{`
-        @keyframes fluidStream {
-          0%   { opacity: 0; transform: scaleX(0) scaleY(0.4); filter: blur(4px); }
-          8%   { opacity: 1; filter: blur(0.5px); }
-          30%  { transform: scaleX(1.04) scaleY(1.15); }
-          55%  { transform: scaleX(1) scaleY(1); opacity: 0.97; }
-          80%  { opacity: 0.82; filter: blur(0.8px); }
-          100% { opacity: 0; transform: scaleX(1.02) scaleY(0.9); filter: blur(3px); }
-        }
-        @keyframes fluidDroplet {
-          0%   { opacity: 0; transform: scale(0.2) translateY(-6px); }
-          25%  { opacity: 1; transform: scale(1.15) translateY(0); }
-          65%  { opacity: 0.88; transform: scale(1) translateY(2px); }
-          100% { opacity: 0; transform: scale(0.85) translateY(5px); }
-        }
-        @keyframes fluidDrip {
-          0%   { height: 0; opacity: 0.9; }
-          18%  { opacity: 1; }
-          60%  { height: 38px; opacity: 0.82; }
-          85%  { height: 52px; opacity: 0.55; }
-          100% { height: 62px; opacity: 0; }
-        }
-      `}</style>
+
 
       {/* Title chip (bottom) */}
       {item.title && (
@@ -757,62 +961,14 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <span style={oilDropIcon} />
         {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
       </button>
-      {oilBursts.map((burst) => (
-        <div key={burst.id} style={{
-          position: "absolute", right: 68, bottom: 80,
-          width: "min(55vw, 500px)", height: 180,
-          pointerEvents: "none", zIndex: 8,
-          transform: `rotate(${burst.angle}deg)`,
-        }}>
-          {burst.streams.map((s) => (
-            <div key={s.key} style={{
-              position: "absolute", right: 0,
-              top: `calc(50% + ${s.yOff}px)`,
-              width: `${Math.round(s.length * 100)}%`,
-              height: s.thickness,
-              transformOrigin: "right center",
-              borderRadius: `${s.thickness * 0.5}px 0 0 ${s.thickness * 0.5}px`,
-              background: `linear-gradient(90deg,
-                rgba(255,255,255,0) 0%,
-                rgba(255,255,255,0.4) 6%,
-                rgba(255,255,255,0.95) 22%,
-                rgba(255,255,255,1) 55%,
-                rgba(255,255,255,0.85) 78%,
-                rgba(255,255,255,0.3) 93%,
-                rgba(255,255,255,0) 100%)`,
-              filter: "blur(0.5px)",
-              mixBlendMode: "screen",
-              opacity: 0,
-              animation: `fluidStream ${s.speed}s ${s.delay}ms cubic-bezier(.08,.72,.18,1) forwards`,
-            }} />
-          ))}
-          {burst.droplets.map((d) => (
-            <div key={d.key} style={{
-              position: "absolute",
-              left: `${d.x}%`, top: `${d.y}%`,
-              width: d.size, height: d.size * 0.85,
-              borderRadius: "52% 48% 55% 45% / 50% 52% 48% 50%",
-              background: "rgba(255,255,255,0.94)",
-              filter: "blur(0.2px)",
-              mixBlendMode: "screen",
-              opacity: 0,
-              animation: `fluidDroplet 0.35s ${d.delay}ms ease-out forwards`,
-            }} />
-          ))}
-          {burst.drips.map((d) => (
-            <div key={d.key} style={{
-              position: "absolute",
-              left: `${d.x}%`, top: `${d.y}%`,
-              width: d.width, height: 0,
-              borderRadius: "0 0 50% 50%",
-              background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.35) 100%)",
-              mixBlendMode: "screen",
-              transformOrigin: "top center",
-              animation: `fluidDrip ${d.speed}s ${d.delay}ms cubic-bezier(.4,.05,.6,.95) forwards`,
-            }} />
-          ))}
-        </div>
-      ))}
+      <canvas
+        ref={splashCanvasRef}
+        style={{
+          position: "fixed", inset: 0, zIndex: 998,
+          pointerEvents: "none",
+          width: "100vw", height: "100vh",
+        }}
+      />
 
       <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
       {showComments && (
@@ -1288,4 +1444,4 @@ const oilCountBadge = {
   position: "absolute", right: -5, top: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
   background: "#fff", color: "#000", border: "1px solid rgba(0,0,0,0.18)", fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center",
 };
-// oilSplash / oilDrip* replaced by per-burst inline styles in fluidStream/fluidDroplet/fluidDrip keyframes
+
