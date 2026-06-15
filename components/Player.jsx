@@ -675,7 +675,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <button onClick={handleClose} style={ctrlBtn} title="Close"><Icon name="x" size={15} /></button>
       </div>
       {markNotice && <div style={markToast}>{markNotice}</div>}
-      <style jsx global>{`@keyframes vaultWeb { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.12) rotate(-12deg); filter: blur(8px); } 18% { opacity: 0.98; filter: blur(0.6px); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(3.8) rotate(10deg); filter: blur(3px); } }`}</style>
+      <style jsx global>{`@keyframes vaultWebSquirt { 0% { opacity: 0; transform: translateX(64px) scaleX(0.08) scaleY(0.72) rotate(-8deg); filter: blur(5px); } 16% { opacity: 0.98; filter: blur(0.3px); } 62% { opacity: 0.86; transform: translateX(-18vw) scaleX(1.08) scaleY(1) rotate(-4deg); filter: blur(0.6px); } 100% { opacity: 0; transform: translateX(-24vw) scaleX(1.18) scaleY(1.08) rotate(-2deg); filter: blur(3px); } } @keyframes vaultWebDrip { 0% { transform: translateY(-7px); opacity: 0; } 28% { opacity: 0.92; } 100% { transform: translateY(28px); opacity: 0; } }`}</style>
 
       {/* Title chip (bottom) */}
       {item.title && (
@@ -699,13 +699,13 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       <button
         onClick={triggerOil}
         style={oilBtn}
-        title="Web splash"
-        aria-label="Web splash"
+        title="Web squirt"
+        aria-label="Web squirt"
       >
-        <span style={{ fontSize: 18, lineHeight: 1 }}>✦</span>
+        <span style={oilDropIcon} />
         {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
       </button>
-      {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, transform: `translate(-50%, -50%) scale(${1 + idx * 0.1})` }} />)}
+      {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, bottom: `${118 + idx * 8}px` }}><span style={oilDripOne} /><span style={oilDripTwo} /><span style={oilDripThree} /></div>)}
 
       <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
       {showComments && (
@@ -1165,19 +1165,30 @@ const zoomBtn = {
 };
 
 const oilBtn = {
-  position: "absolute", right: 18, bottom: 86, zIndex: 8,
-  width: 54, height: 54, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.28)",
-  background: "radial-gradient(circle at 34% 24%, #ffffff, rgba(255,255,255,0.86) 42%, rgba(220,220,220,0.56))",
-  color: "#080808", boxShadow: "0 14px 42px rgba(0,0,0,0.48)", cursor: "pointer", display: "grid", placeItems: "center",
+  position: "absolute", right: 22, bottom: 24, zIndex: 9,
+  width: 46, height: 46, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.34)",
+  background: "radial-gradient(circle at 35% 27%, #fff 0 18%, rgba(255,255,255,0.86) 42%, rgba(255,255,255,0.42) 100%)",
+  color: "#080808", boxShadow: "0 16px 38px rgba(0,0,0,0.44), inset 0 1px 9px rgba(255,255,255,0.7)", cursor: "pointer", display: "grid", placeItems: "center",
+  backdropFilter: "blur(10px)",
+};
+const oilDropIcon = {
+  width: 16, height: 20, borderRadius: "55% 55% 62% 38% / 62% 62% 45% 45%",
+  background: "linear-gradient(145deg, #fff, rgba(255,255,255,0.86))",
+  transform: "rotate(36deg)",
+  boxShadow: "0 0 10px rgba(255,255,255,0.75)",
 };
 const oilCountBadge = {
   position: "absolute", right: -5, top: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
   background: "#fff", color: "#000", border: "1px solid rgba(0,0,0,0.18)", fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center",
 };
 const oilSplash = {
-  position: "absolute", left: "50%", top: "50%", zIndex: 7,
-  width: "min(76vw, 720px)", height: "min(76vw, 720px)", borderRadius: "54% 46% 62% 38%",
+  position: "absolute", right: 54, zIndex: 8,
+  width: "min(46vw, 420px)", height: 128, borderRadius: "60% 36% 58% 42% / 42% 64% 36% 58%",
   pointerEvents: "none",
-  background: "radial-gradient(ellipse at 32% 55%, rgba(255,255,255,0.98) 0 7%, transparent 8%), radial-gradient(ellipse at 56% 42%, rgba(255,255,255,0.92) 0 5%, transparent 6%), radial-gradient(ellipse at 22% 74%, rgba(255,255,255,0.95) 0 11%, transparent 12%), conic-gradient(from 220deg, transparent 0 7%, rgba(255,255,255,0.98) 8% 12%, transparent 13% 22%, rgba(255,255,255,0.92) 23% 27%, transparent 28% 42%, rgba(255,255,255,0.96) 43% 48%, transparent 49% 100%)",
-  mixBlendMode: "screen", opacity: 0, animation: "vaultWeb 0.86s cubic-bezier(.16,.84,.2,1) forwards",
+  background: "radial-gradient(ellipse at 7% 50%, rgba(255,255,255,0.98) 0 4%, transparent 5%), radial-gradient(ellipse at 22% 52%, rgba(255,255,255,0.96) 0 8%, transparent 9%), radial-gradient(ellipse at 42% 47%, rgba(255,255,255,0.92) 0 5%, transparent 6%), radial-gradient(ellipse at 68% 49%, rgba(255,255,255,0.94) 0 7%, transparent 8%), linear-gradient(92deg, transparent 0 7%, rgba(255,255,255,0.96) 10% 18%, transparent 20% 26%, rgba(255,255,255,0.88) 29% 54%, transparent 58% 63%, rgba(255,255,255,0.92) 67% 100%)",
+  mixBlendMode: "screen", opacity: 0, transformOrigin: "right center", animation: "vaultWebSquirt 0.78s cubic-bezier(.16,.84,.2,1) forwards",
+  filter: "drop-shadow(0 0 10px rgba(255,255,255,0.45))",
 };
+const oilDripOne = { position: "absolute", left: "24%", top: "58%", width: 6, height: 18, borderRadius: 999, background: "rgba(255,255,255,0.92)", animation: "vaultWebDrip 0.82s 0.12s ease-out forwards" };
+const oilDripTwo = { position: "absolute", left: "52%", top: "50%", width: 4, height: 15, borderRadius: 999, background: "rgba(255,255,255,0.82)", animation: "vaultWebDrip 0.78s 0.18s ease-out forwards" };
+const oilDripThree = { position: "absolute", left: "76%", top: "56%", width: 5, height: 22, borderRadius: 999, background: "rgba(255,255,255,0.88)", animation: "vaultWebDrip 0.9s 0.08s ease-out forwards" };
