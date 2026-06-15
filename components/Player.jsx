@@ -439,247 +439,267 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     const W = canvas.width  = window.innerWidth;
     const H = canvas.height = window.innerHeight;
     const ctx = canvas.getContext("2d");
-
-    // Cancel any running animation
     if (splashAnimRef.current) cancelAnimationFrame(splashAnimRef.current);
 
-    // ── Generate particles ──────────────────────────────────────────────────
-    // Origin: roughly where the oil button sits (bottom-right)
-    const ox = W - 80;
-    const oy = H - 80;
+    // ── Splash origin: center-screen (where the mass lands) ─────────────────
+    const cx = W * 0.5 + (Math.random() - 0.5) * W * 0.15;
+    const cy = H * 0.48 + (Math.random() - 0.5) * H * 0.12;
 
-    // Main arcing streams — thick ropes of fluid
-    const streams = Array.from({ length: 5 + Math.floor(Math.random() * 4) }, () => {
-      const angle = Math.PI + (Math.random() - 0.5) * 1.1;  // leftward arc
-      const speed = 18 + Math.random() * 22;
+    // ── Metaball nodes — these form the blobby central mass ─────────────────
+    // Each node is a sphere of influence; where fields overlap the surface merges
+    const nodes = Array.from({ length: 14 + Math.floor(Math.random() * 8) }, (_, i) => {
+      const angle = (i / 14) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
+      const dist  = i === 0 ? 0 : 20 + Math.random() * 55;
       return {
-        x: ox, y: oy,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - (6 + Math.random() * 8), // upward bias
+        x: cx + Math.cos(angle) * dist,
+        y: cy + Math.sin(angle) * dist,
+        // Each node pulses outward from center
+        vx: i === 0 ? 0 : Math.cos(angle) * (1.2 + Math.random() * 2.8),
+        vy: i === 0 ? 0 : Math.sin(angle) * (1.2 + Math.random() * 2.8) - Math.random() * 1.2,
+        r: i === 0 ? 52 + Math.random() * 28 : 18 + Math.random() * 28,
         life: 1,
-        decay: 0.012 + Math.random() * 0.01,
-        width: 6 + Math.random() * 14,
-        wobble: (Math.random() - 0.5) * 0.04,
-        trail: [],
+        decay: i === 0 ? 0.004 : 0.007 + Math.random() * 0.006,
+        gravity: 0.04 + Math.random() * 0.06,
       };
     });
 
-    // Splatter micro-droplets — scatter all over screen
-    const droplets = Array.from({ length: 60 + Math.floor(Math.random() * 40) }, () => {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 4 + Math.random() * 28;
+    // ── Tendrils — curved bezier arms shooting outward ───────────────────────
+    const tendrils = Array.from({ length: 10 + Math.floor(Math.random() * 8) }, () => {
+      const angle  = Math.random() * Math.PI * 2;
+      const len    = 80 + Math.random() * 180;
+      const ctrl1A = angle + (Math.random() - 0.5) * 1.0;
+      const ctrl2A = angle + (Math.random() - 0.5) * 0.6;
       return {
-        x: ox + (Math.random() - 0.5) * 40,
-        y: oy + (Math.random() - 0.5) * 40,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - (Math.random() * 12),
-        r: 1.5 + Math.random() * 7,
-        life: 0.7 + Math.random() * 0.3,
-        decay: 0.008 + Math.random() * 0.018,
-        gravity: 0.18 + Math.random() * 0.22,
-        splat: false,
-        splatY: 0,
-        splatR: 0,
+        angle, len,
+        progress: 0,             // 0→1 how far the tendril has extended
+        speed: 0.022 + Math.random() * 0.018,
+        baseW: 8 + Math.random() * 18,
+        ctrl1: { dx: Math.cos(ctrl1A) * len * 0.4, dy: Math.sin(ctrl1A) * len * 0.4 },
+        ctrl2: { dx: Math.cos(ctrl2A) * len * 0.75, dy: Math.sin(ctrl2A) * len * 0.75 + Math.random() * 30 },
+        endDx: Math.cos(angle) * len,
+        endDy: Math.sin(angle) * len + Math.random() * 40, // gravity droop at tip
+        life: 1,
+        decay: 0.005 + Math.random() * 0.004,
+        tipR: 2 + Math.random() * 6,
+        hasBead: Math.random() > 0.45,
       };
     });
 
-    // Central impact blob — the big mass that lands on screen
-    const blob = {
-      x: ox - (180 + Math.random() * 220),
-      y: oy - (60 + Math.random() * 80),
-      r: 0,
-      targetR: 55 + Math.random() * 45,
-      life: 1,
-      decay: 0.006,
-      arms: Array.from({ length: 8 + Math.floor(Math.random() * 6) }, () => ({
-        angle: Math.random() * Math.PI * 2,
-        len: 30 + Math.random() * 90,
-        width: 3 + Math.random() * 10,
-        tip: 1 + Math.random() * 4,
-        curve: (Math.random() - 0.5) * 0.9,
-      })),
-      drips: Array.from({ length: 4 + Math.floor(Math.random() * 5) }, () => ({
-        angle: Math.PI * 0.3 + Math.random() * Math.PI * 1.4, // downward range
-        x: 0, y: 0,
-        len: 0,
-        targetLen: 40 + Math.random() * 120,
-        speed: 0.6 + Math.random() * 1.2,
-        width: 2 + Math.random() * 6,
-        beaded: Math.random() > 0.4,
-      })),
-      born: performance.now(),
-    };
+    // ── Micro-droplets scattered all over ────────────────────────────────────
+    const droplets = Array.from({ length: 80 + Math.floor(Math.random() * 50) }, () => {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 3 + Math.random() * 32;
+      return {
+        x: cx + (Math.random() - 0.5) * 60,
+        y: cy + (Math.random() - 0.5) * 60,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - Math.random() * 8,
+        r: 1 + Math.random() * 9,
+        life: 0.6 + Math.random() * 0.4,
+        decay: 0.007 + Math.random() * 0.014,
+        gravity: 0.15 + Math.random() * 0.25,
+        splat: false, splatX: 0, splatY: 0, splatRx: 0, splatRy: 0,
+      };
+    });
 
-    const startTime = performance.now();
+    // ── Drip threads — thin strings hanging down from mass ───────────────────
+    const drips = Array.from({ length: 5 + Math.floor(Math.random() * 6) }, () => ({
+      x: cx + (Math.random() - 0.5) * 120,
+      y: cy + 30 + Math.random() * 60,
+      w: 2 + Math.random() * 7,
+      len: 0,
+      targetLen: 60 + Math.random() * 160,
+      speed: 0.8 + Math.random() * 2,
+      life: 1,
+      decay: 0.004,
+      beads: Math.random() > 0.4,
+    }));
+
+    const born = performance.now();
+
+    // ── Offscreen canvas for metaball field ──────────────────────────────────
+    // We render metaballs at 1/4 res for perf then scale up (still looks great)
+    const scale  = 0.22;
+    const mW     = Math.ceil(W * scale);
+    const mH     = Math.ceil(H * scale);
+    const offscreen = document.createElement("canvas");
+    offscreen.width  = mW;
+    offscreen.height = mH;
+    const mctx  = offscreen.getContext("2d");
+    const imgData = mctx.createImageData(mW, mH);
+    const pix     = imgData.data;
 
     function draw(now) {
-      const elapsed = now - startTime;
+      const age = (now - born) / 1000;
       ctx.clearRect(0, 0, W, H);
 
-      // ── Draw streams ───────────────────────────────────────────────────────
-      streams.forEach((s) => {
-        if (s.life <= 0) return;
-        s.trail.push({ x: s.x, y: s.y, w: s.width * s.life });
-        if (s.trail.length > 28) s.trail.shift();
+      // ── Advance metaball nodes ─────────────────────────────────────────────
+      nodes.forEach((n) => {
+        n.vy += n.gravity;
+        n.x  += n.vx;
+        n.y  += n.vy;
+        n.vx *= 0.985;
+        n.vy *= 0.985;
+        n.life -= n.decay;
+      });
 
-        s.vx += s.wobble;
-        s.vy += 0.55; // gravity
-        s.x  += s.vx;
-        s.y  += s.vy;
-        s.life -= s.decay;
-
-        if (s.trail.length > 2) {
-          ctx.beginPath();
-          ctx.moveTo(s.trail[0].x, s.trail[0].y);
-          for (let i = 1; i < s.trail.length; i++) {
-            const t = s.trail[i];
-            ctx.lineTo(t.x, t.y);
+      // ── Render metaball field pixel-by-pixel (downscaled) ─────────────────
+      const alive = nodes.filter((n) => n.life > 0.05);
+      if (alive.length > 0) {
+        for (let py = 0; py < mH; py++) {
+          for (let px = 0; px < mW; px++) {
+            // World coords
+            const wx = px / scale;
+            const wy = py / scale;
+            let field = 0;
+            for (let ni = 0; ni < alive.length; ni++) {
+              const n  = alive[ni];
+              const dx = wx - n.x;
+              const dy = wy - n.y;
+              const d2 = dx * dx + dy * dy;
+              const rr = n.r * n.r * n.life;
+              field += rr / (d2 + 0.001);
+            }
+            const idx = (py * mW + px) * 4;
+            if (field > 1.0) {
+              // Inside the blob — luminance based on field strength for 3D sheen
+              const intensity = Math.min(1, (field - 1) * 0.6 + 0.55);
+              // Highlight offset for 3D look — top-left is brighter
+              const hilight   = Math.min(1, intensity * 1.35);
+              pix[idx]     = Math.round(220 + hilight * 35);
+              pix[idx + 1] = Math.round(225 + hilight * 30);
+              pix[idx + 2] = Math.round(240 + hilight * 15);
+              pix[idx + 3] = Math.round(Math.min(255, intensity * 310));
+            } else {
+              pix[idx + 3] = 0;
+            }
           }
-          ctx.strokeStyle = `rgba(255,255,255,${Math.max(0, s.life * 0.95)})`;
-          ctx.lineWidth   = Math.max(0.5, s.width * s.life);
+        }
+        mctx.putImageData(imgData, 0, 0);
+
+        // Blit upscaled to main canvas with glow
+        ctx.save();
+        ctx.shadowColor = "rgba(255,255,255,0.55)";
+        ctx.shadowBlur  = 28;
+        ctx.drawImage(offscreen, 0, 0, W, H);
+        ctx.restore();
+      }
+
+      // ── Draw tendrils ──────────────────────────────────────────────────────
+      tendrils.forEach((t) => {
+        if (t.life <= 0) return;
+        t.progress = Math.min(1, t.progress + t.speed);
+        t.life    -= t.decay;
+        const p    = t.progress;
+        const alpha = t.life * 0.95;
+
+        // Bezier: start at cx,cy, curve out to the tip
+        // Draw as a thick-to-thin tapered stroke by stepping along the curve
+        const steps = 28;
+        for (let i = 0; i < steps - 1; i++) {
+          const t0 = (i / steps) * p;
+          const t1 = ((i + 1) / steps) * p;
+          // Cubic bezier point
+          const bx0 = Math.pow(1-t0,3)*cx + 3*Math.pow(1-t0,2)*t0*(cx+t.ctrl1.dx) + 3*(1-t0)*t0*t0*(cx+t.ctrl2.dx) + t0*t0*t0*(cx+t.endDx);
+          const by0 = Math.pow(1-t0,3)*cy + 3*Math.pow(1-t0,2)*t0*(cy+t.ctrl1.dy) + 3*(1-t0)*t0*t0*(cy+t.ctrl2.dy) + t0*t0*t0*(cy+t.endDy);
+          const bx1 = Math.pow(1-t1,3)*cx + 3*Math.pow(1-t1,2)*t1*(cx+t.ctrl1.dx) + 3*(1-t1)*t1*t1*(cx+t.ctrl2.dx) + t1*t1*t1*(cx+t.endDx);
+          const by1 = Math.pow(1-t1,3)*cy + 3*Math.pow(1-t1,2)*t1*(cy+t.ctrl1.dy) + 3*(1-t1)*t1*t1*(cy+t.ctrl2.dy) + t1*t1*t1*(cy+t.endDy);
+          const w   = t.baseW * (1 - t0 * 0.88) * alpha; // taper: fat at root, thin at tip
+
+          ctx.beginPath();
+          ctx.moveTo(bx0, by0);
+          ctx.lineTo(bx1, by1);
+          ctx.strokeStyle = `rgba(255,255,255,${alpha * (1 - t0 * 0.5)})`;
+          ctx.lineWidth   = Math.max(0.4, w);
           ctx.lineCap     = "round";
-          ctx.lineJoin    = "round";
-          ctx.shadowColor = "rgba(255,255,255,0.6)";
-          ctx.shadowBlur  = 8;
+          ctx.shadowColor = "rgba(255,255,255,0.35)";
+          ctx.shadowBlur  = 5;
           ctx.stroke();
           ctx.shadowBlur  = 0;
         }
+
+        // Tip droplet / bead
+        if (p > 0.6 && t.hasBead) {
+          const tipX = cx + t.endDx * p;
+          const tipY = cy + t.endDy * p;
+          ctx.beginPath();
+          ctx.arc(tipX, tipY, t.tipR * alpha, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${alpha * 0.9})`;
+          ctx.fill();
+        }
       });
 
-      // ── Draw droplets ──────────────────────────────────────────────────────
+      // ── Draw micro-droplets ────────────────────────────────────────────────
       droplets.forEach((d) => {
         if (d.life <= 0) return;
         if (!d.splat) {
           d.vy += d.gravity;
-          d.x  += d.vx * 0.96;
+          d.x  += d.vx * 0.97;
           d.y  += d.vy;
           d.vx *= 0.98;
           d.life -= d.decay;
 
           ctx.beginPath();
-          ctx.arc(d.x, d.y, Math.max(0.3, d.r * d.life), 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${Math.min(1, d.life * 1.1)})`;
-          ctx.shadowColor = "rgba(255,255,255,0.5)";
-          ctx.shadowBlur  = 4;
+          ctx.arc(d.x, d.y, Math.max(0.3, d.r * Math.min(1, d.life * 1.4)), 0, Math.PI * 2);
+          ctx.fillStyle   = `rgba(255,255,255,${d.life * 0.95})`;
+          ctx.shadowColor = "rgba(255,255,255,0.4)";
+          ctx.shadowBlur  = 3;
           ctx.fill();
           ctx.shadowBlur  = 0;
 
-          // Splat when hitting bottom or edges
-          if (d.y > H * 0.88 || d.x < 10 || d.x > W - 10) {
+          if (d.y > H - 20 || d.x < 8 || d.x > W - 8) {
             d.splat  = true;
-            d.splatY = d.y;
-            d.splatR = d.r * (2 + Math.random() * 3);
+            d.splatX = d.x; d.splatY = Math.min(d.y, H - 8);
+            d.splatRx = d.r * (2.5 + Math.random() * 2.5);
+            d.splatRy = d.r * (0.3 + Math.random() * 0.4);
           }
         } else {
-          // Splat puddle
-          d.life -= 0.005;
-          const alpha = Math.max(0, d.life * 0.7);
+          d.life -= 0.004;
           ctx.beginPath();
-          ctx.ellipse(d.x, d.splatY, d.splatR * 1.8, d.splatR * 0.4, 0, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+          ctx.ellipse(d.splatX, d.splatY, d.splatRx, d.splatRy, 0, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${d.life * 0.65})`;
           ctx.fill();
         }
       });
 
-      // ── Draw central blob ──────────────────────────────────────────────────
-      if (blob.life > 0) {
-        const age = (now - blob.born) / 1000;
-        blob.r = Math.min(blob.targetR, blob.r + (blob.targetR - blob.r) * 0.18);
-        blob.life -= blob.decay;
-        const alpha = Math.min(1, blob.life * 1.3);
+      // ── Draw drip threads ──────────────────────────────────────────────────
+      drips.forEach((dr) => {
+        if (dr.life <= 0) return;
+        dr.len   = Math.min(dr.targetLen, dr.len + dr.speed * (1 + age * 0.5));
+        dr.life -= dr.decay;
+        const alpha = dr.life;
 
-        // Core blob with radial gradient for 3D feel
-        const grd = ctx.createRadialGradient(
-          blob.x - blob.r * 0.28, blob.y - blob.r * 0.28, blob.r * 0.05,
-          blob.x, blob.y, blob.r * 1.1
-        );
-        grd.addColorStop(0,   `rgba(255,255,255,${alpha})`);
-        grd.addColorStop(0.5, `rgba(240,240,250,${alpha * 0.92})`);
-        grd.addColorStop(1,   `rgba(200,210,230,${alpha * 0.4})`);
-
-        ctx.beginPath();
-        ctx.arc(blob.x, blob.y, blob.r, 0, Math.PI * 2);
-        ctx.fillStyle = grd;
-        ctx.shadowColor = "rgba(255,255,255,0.7)";
-        ctx.shadowBlur  = 22;
-        ctx.fill();
-        ctx.shadowBlur  = 0;
-
-        // Arms / tendrils shooting out
-        blob.arms.forEach((arm) => {
-          const ax = blob.x + Math.cos(arm.angle + age * arm.curve) * blob.r * 0.7;
-          const ay = blob.y + Math.sin(arm.angle + age * arm.curve) * blob.r * 0.7;
-          const ex = blob.x + Math.cos(arm.angle + age * arm.curve) * (blob.r + arm.len * Math.min(1, age * 2.2));
-          const ey = blob.y + Math.sin(arm.angle + age * arm.curve) * (blob.r + arm.len * Math.min(1, age * 2.2));
-
-          const gr = ctx.createLinearGradient(ax, ay, ex, ey);
-          gr.addColorStop(0,   `rgba(255,255,255,${alpha * 0.95})`);
-          gr.addColorStop(0.7, `rgba(255,255,255,${alpha * 0.6})`);
-          gr.addColorStop(1,   `rgba(255,255,255,0)`);
-
-          ctx.beginPath();
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(ex, ey);
-          ctx.strokeStyle = gr;
-          ctx.lineWidth   = arm.width * Math.max(0, 1 - age * 0.5);
-          ctx.lineCap     = "round";
-          ctx.shadowColor = "rgba(255,255,255,0.4)";
-          ctx.shadowBlur  = 6;
-          ctx.stroke();
-          ctx.shadowBlur  = 0;
-
-          // Tip droplet
-          if (age > 0.3) {
+        if (dr.beads) {
+          const beadCount = Math.floor(dr.len / 12);
+          for (let i = 0; i <= beadCount; i++) {
+            const t  = i / Math.max(1, beadCount);
+            const bx = dr.x;
+            const by = dr.y + t * dr.len;
+            const br = dr.w * 0.55 * (1 - t * 0.45) * alpha;
             ctx.beginPath();
-            ctx.arc(ex, ey, arm.tip * Math.max(0, blob.life), 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,255,${alpha * 0.85})`;
+            ctx.arc(bx, by, Math.max(0.3, br), 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,255,255,${alpha * (1 - t * 0.6)})`;
             ctx.fill();
           }
-        });
-
-        // Drips hanging downward
-        blob.drips.forEach((dr) => {
-          dr.len = Math.min(dr.targetLen, dr.len + dr.speed * (1 + age));
-          const startX = blob.x + Math.cos(dr.angle) * blob.r * 0.6;
-          const startY = blob.y + Math.sin(dr.angle) * blob.r * 0.6;
-          const endX   = startX + Math.cos(dr.angle) * dr.len * 0.25;
-          const endY   = startY + dr.len; // gravity pulls straight down
-
-          const dg = ctx.createLinearGradient(startX, startY, endX, endY);
-          dg.addColorStop(0,    `rgba(255,255,255,${alpha * 0.9})`);
-          dg.addColorStop(0.65, `rgba(255,255,255,${alpha * 0.55})`);
+        } else {
+          const dg = ctx.createLinearGradient(dr.x, dr.y, dr.x, dr.y + dr.len);
+          dg.addColorStop(0,    `rgba(255,255,255,${alpha * 0.92})`);
+          dg.addColorStop(0.7,  `rgba(255,255,255,${alpha * 0.5})`);
           dg.addColorStop(1,    `rgba(255,255,255,0)`);
-
           ctx.beginPath();
-          ctx.moveTo(startX, startY);
-          if (dr.beaded) {
-            // Beaded drip — series of blobs
-            const steps = Math.floor(dr.len / 14);
-            for (let i = 1; i <= steps; i++) {
-              const t  = i / Math.max(1, steps);
-              const bx = startX + (endX - startX) * t;
-              const by = startY + (endY - startY) * t;
-              const br = (dr.width * 0.5) * (1 - t * 0.5) * alpha;
-              ctx.beginPath();
-              ctx.arc(bx, by, Math.max(0.2, br), 0, Math.PI * 2);
-              ctx.fillStyle = `rgba(255,255,255,${alpha * (1 - t * 0.7)})`;
-              ctx.fill();
-            }
-          } else {
-            ctx.moveTo(startX, startY);
-            ctx.lineTo(endX, endY);
-            ctx.strokeStyle = dg;
-            ctx.lineWidth   = dr.width * alpha;
-            ctx.lineCap     = "round";
-            ctx.stroke();
-          }
-        });
-      }
+          ctx.moveTo(dr.x, dr.y);
+          ctx.lineTo(dr.x, dr.y + dr.len);
+          ctx.strokeStyle = dg;
+          ctx.lineWidth   = dr.w * alpha;
+          ctx.lineCap     = "round";
+          ctx.stroke();
+        }
+      });
 
-      // Keep running until everything fades
-      const anyAlive = blob.life > 0
-        || streams.some((s) => s.life > 0)
-        || droplets.some((d) => d.life > 0);
+      const anyAlive = nodes.some((n) => n.life > 0)
+        || tendrils.some((t) => t.life > 0)
+        || droplets.some((d) => d.life > 0)
+        || drips.some((dr) => dr.life > 0);
 
       if (anyAlive) {
         splashAnimRef.current = requestAnimationFrame(draw);
