@@ -725,8 +725,8 @@ export default function Vault() {
     return sortItems(items);
   }, [activeFolder, flatFolderView, activeFolderFlatItems, viewItems, sourceFilter, folderMediaFilter, search, mediaKindOf, sortItems]);
 
-  const activeFolderIsNestedGallery = !!activeFolder && activeFolder.kind === "gallery" && !!activeFolder.parent_folder;
-  const showFolderSlideshow = activeFolderIsNestedGallery && activeFolder.display_mode === "slideshow" && renderedItems.length > 0 && viewMode !== "list";
+  const activeFolderCanSlideshow = !!activeFolder;
+  const showFolderSlideshow = activeFolderCanSlideshow && activeFolder.display_mode === "slideshow" && renderedItems.length > 0 && viewMode !== "list";
 
   const selectedItems = useMemo(() => renderedItems.filter((i) => selectedKeys.has(i.key)), [renderedItems, selectedKeys]);
 
@@ -863,7 +863,7 @@ export default function Vault() {
               galleries={rootFolderCards}
               onOpenGallery={(name) => navigate(`folder:${name}`)}
               isMobile={isMobile}
-              canSlideshow={activeFolderIsNestedGallery}
+              canSlideshow={false}
             />
           )}
 
@@ -880,6 +880,7 @@ export default function Vault() {
               onCreateGallery={() => handleCreateGallery(activeFolder.name)}
               onUpdate={(patch) => handleUpdateFolderSettings(activeFolder.name, patch)}
               isMobile={isMobile}
+              canSlideshow={activeFolderCanSlideshow}
             />
           )}
 

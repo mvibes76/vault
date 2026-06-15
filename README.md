@@ -113,3 +113,6 @@ Adds nested gallery buckets inside folders, folder expand-all mode, bulk selecti
 ## v28
 
 Gallery and slideshow image rendering now uses a safer fallback chain so image URLs without generated thumbnails still display instead of showing a broken image icon.
+
+## v30
+- Fixed folder slideshow/gallery display toggle so it works in all folders, not only one gallery-type folder.
