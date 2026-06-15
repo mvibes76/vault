@@ -15,7 +15,7 @@ import {
   supabase, isSupabaseConfigured, getUserData, toggleFavorite,
   setItemFolder, getFolders, createFolder, deleteFolder, renameFolder, updateFolder, recordFolderView,
   getSettings, saveSettings, saveProgress,
-  getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark, recordItemView,
+  getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark, recordItemView, recordItemOil,
   getCoverLibrary, upsertCover, deleteCover,
 } from "@/lib/supabase";
 
@@ -60,6 +60,7 @@ export default function Vault() {
   const [showSort, setShowSort]         = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showFilterPills, setShowFilterPills] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [coverRules, setCoverRules] = useState([]); // legacy text rules kept for old installs
   const [coverLibrary, setCoverLibrary] = useState([]);
@@ -501,6 +502,24 @@ export default function Vault() {
     if (user) await addMomentMark(user.id, key, mark);
   };
 
+  const handleOilItem = async (key) => {
+    const now = new Date().toISOString();
+    setUserData((prev) => {
+      const current = prev[key] || {};
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          item_key: key,
+          oil_count: Number(current.oil_count || 0) + 1,
+          last_oiled_at: now,
+          updated_at: now,
+        },
+      };
+    });
+    if (user) await recordItemOil(user.id, key).catch(() => {});
+  };
+
   const handleMarkWatched = async (key) => {
     const dur = userData[key]?.duration || 3600;
     setUserData((prev) => ({
@@ -647,6 +666,10 @@ export default function Vault() {
   const recentlyAdded = useMemo(() => [...allItems]
     .sort((a, b) => new Date(b.addedAt || b.updatedAt || 0) - new Date(a.addedAt || a.updatedAt || 0))
     .slice(0, 8), [allItems]);
+  const mostOiledItems = useMemo(() => [...allItems]
+    .filter((i) => Number(userData[i.key]?.oil_count || 0) > 0)
+    .sort((a, b) => Number(userData[b.key]?.oil_count || 0) - Number(userData[a.key]?.oil_count || 0))
+    .slice(0, 8), [allItems, userData]);
   const totalViews = useMemo(() => allItems.reduce((sum, i) => sum + Number(userData[i.key]?.view_count || 0), 0), [allItems, userData]);
   const folderCards = useMemo(() => folders.map((folder) => {
     const items = itemsForFolder(folder.name);
@@ -685,8 +708,6 @@ export default function Vault() {
   }, [activeFolder, descendantFolderNames, allItems, folderForItem]);
   const activeFolderKinds = activeFolder ? ["all", ...[...new Set((flatFolderView ? activeFolderFlatItems : activeFolderItemsAll).map(mediaKindOf))].filter(Boolean)] : ["all"];
   const showOrganizerOnly = activeView === "all" && rootFolderCards.length > 0 && !flatEverything && !search && sourceFilter === "all";
-  const showFolderSlideshow = !!activeFolder && activeFolder.display_mode === "slideshow" && renderedItems.length > 0 && viewMode !== "list";
-
   const renderedItems = useMemo(() => {
     if (!activeFolder || !flatFolderView) return viewItems;
     let items = activeFolderFlatItems;
@@ -703,6 +724,9 @@ export default function Vault() {
     }
     return sortItems(items);
   }, [activeFolder, flatFolderView, activeFolderFlatItems, viewItems, sourceFilter, folderMediaFilter, search, mediaKindOf, sortItems]);
+
+  const activeFolderIsNestedGallery = !!activeFolder && activeFolder.kind === "gallery" && !!activeFolder.parent_folder;
+  const showFolderSlideshow = activeFolderIsNestedGallery && activeFolder.display_mode === "slideshow" && renderedItems.length > 0 && viewMode !== "list";
 
   const selectedItems = useMemo(() => renderedItems.filter((i) => selectedKeys.has(i.key)), [renderedItems, selectedKeys]);
 
@@ -770,6 +794,7 @@ export default function Vault() {
             sortBy={sortBy} onSortChange={setSortBy}
             onQuickAdd={() => setShowQuickAdd(true)}
             installPrompt={installPrompt} onInstall={handleInstall}
+            showFilterPills={showFilterPills} onToggleFilters={() => setShowFilterPills((v) => !v)}
           />
         )}
 
@@ -779,14 +804,14 @@ export default function Vault() {
           </div>
         )}
 
-        {folders.length > 0 && (
+        {showFilterPills && folders.length > 0 && (
           <ScrollRow>
             <Pill active={activeView === "all"} onClick={() => navigate("all")}>All</Pill>
             {folders.map((f) => <Pill key={f.name} active={activeView === `folder:${f.name}`} onClick={() => navigate(`folder:${f.name}`)}>{f.name}</Pill>)}
           </ScrollRow>
         )}
 
-        {sourcesPresent.length > 1 && (
+        {showFilterPills && sourcesPresent.length > 1 && (
           <ScrollRow>
             <Pill active={sourceFilter === "all"} onClick={() => setSourceFilter("all")}>All sources</Pill>
             {sourcesPresent.map((s) => (
@@ -811,6 +836,7 @@ export default function Vault() {
               recentlyViewed={recentlyViewed}
               recentlyAdded={recentlyAdded}
               topRatedItems={topRatedItems}
+              mostOiledItems={mostOiledItems}
               userData={userData}
               onOpen={openItem}
               onNavigate={navigate}
@@ -837,6 +863,7 @@ export default function Vault() {
               galleries={rootFolderCards}
               onOpenGallery={(name) => navigate(`folder:${name}`)}
               isMobile={isMobile}
+              canSlideshow={activeFolderIsNestedGallery}
             />
           )}
 
@@ -883,6 +910,7 @@ export default function Vault() {
               folders={folders}
               onMove={handleBulkMove}
               onDelete={handleBulkDelete}
+              onSelectAll={() => setSelectedKeys(new Set(renderedItems.map((i) => i.key)))}
               onClear={() => setSelectedKeys(new Set())}
             />
           )}
@@ -936,6 +964,8 @@ export default function Vault() {
           rating={userData[activeItem.key]?.rating || 0}
           onRate={(rating) => handleSetRating(activeItem.key, rating)}
           onAddMoment={(mark) => handleAddMomentMark(activeItem.key, mark)}
+          oilCount={Number(userData[activeItem.key]?.oil_count || 0)}
+          onOil={() => handleOilItem(activeItem.key)}
         />
       )}
 
@@ -976,6 +1006,7 @@ function GalleryGrid({ galleries, onOpenGallery, isMobile }) {
 
 function GalleryCard({ gallery, onOpen, compact = false }) {
   const { folder, items, count, coverItem } = gallery;
+  const displayAsGallery = folder.kind === "gallery" && !!folder.parent_folder;
   const explicit = folder.cover ? proxiedMediaUrl(normalizeCoverUrl(folder.cover)) : "";
   const itemThumb = coverItem?.thumbnail ? proxiedMediaUrl(normalizeCoverUrl(coverItem.thumbnail)) : "";
   const src = explicit || itemThumb;
@@ -990,7 +1021,7 @@ function GalleryCard({ gallery, onOpen, compact = false }) {
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.68))" }} />
         <div style={{ position: "absolute", left: 12, right: 12, bottom: 12 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", borderRadius: 999, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.12)", color: T.text2, fontSize: 10, marginBottom: 8 }}>
-            <Icon name={folder.kind === "gallery" ? "showcase" : "folder"} size={11} /> {folder.kind === "gallery" ? "Gallery" : "Folder"}
+            <Icon name={displayAsGallery ? "showcase" : "folder"} size={11} /> {displayAsGallery ? "Gallery" : "Folder"}
           </div>
           <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: -0.4, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{folder.name}</div>
           <div style={{ marginTop: 5, fontSize: 11, color: T.text3 }}>{count} items{videoCount ? ` · ${videoCount} video` : ""}{photoCount ? ` · ${photoCount} photo` : ""}</div>
@@ -1027,13 +1058,13 @@ function SlideshowGallery({ items, onOpen, cardProps }) {
   );
 }
 
-function FolderHeader({ folder, count, childCount = 0, filters, mediaFilter, onMediaFilter, flatFolderView, onToggleFlat, onCreateGallery, onUpdate, isMobile }) {
+function FolderHeader({ folder, count, childCount = 0, filters, mediaFilter, onMediaFilter, flatFolderView, onToggleFlat, onCreateGallery, onUpdate, isMobile, canSlideshow = false }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(folder.name || "");
   const [cover, setCover] = useState(folder.cover || "");
   const [note, setNote] = useState(folder.note || "");
   useEffect(() => { setName(folder.name || ""); setCover(folder.cover || ""); setNote(folder.note || ""); }, [folder.name, folder.cover, folder.note]);
-  const isGallery = folder.kind === "gallery";
+  const isGallery = folder.kind === "gallery" && !!folder.parent_folder;
   return (
     <div style={{ marginBottom: 16, border: `1px solid ${T.border}`, borderRadius: 18, padding: isMobile ? 12 : 14, background: "rgba(255,255,255,0.032)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -1046,9 +1077,9 @@ function FolderHeader({ folder, count, childCount = 0, filters, mediaFilter, onM
           {folder.note && <div style={{ marginTop: 6, color: T.text4, fontSize: 12, maxWidth: 760 }}>{folder.note}</div>}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={onCreateGallery} style={dashSecondary}>New gallery inside</button>
+          <button onClick={onCreateGallery} style={dashSecondary}>New gallery</button>
           <button onClick={onToggleFlat} style={flatFolderView ? dashPrimary : dashSecondary}>{flatFolderView ? "Organized" : "Expand all"}</button>
-          <button onClick={() => onUpdate({ display_mode: folder.display_mode === "slideshow" ? "grid" : "slideshow" })} style={dashSecondary}>{folder.display_mode === "slideshow" ? "Grid" : "Slideshow"}</button>
+          {canSlideshow && <button onClick={() => onUpdate({ display_mode: folder.display_mode === "slideshow" ? "grid" : "slideshow" })} style={dashSecondary}>{folder.display_mode === "slideshow" ? "Grid" : "Slideshow"}</button>}
           <button onClick={() => setEditing((v) => !v)} style={dashSecondary}>Edit</button>
         </div>
       </div>
@@ -1071,12 +1102,13 @@ function FolderHeader({ folder, count, childCount = 0, filters, mediaFilter, onM
 }
 
 
-function BulkToolbar({ selectMode, selectedCount, onToggle, folders, onMove, onDelete, onClear }) {
+function BulkToolbar({ selectMode, selectedCount, onToggle, folders, onMove, onDelete, onSelectAll, onClear }) {
   const [moveOpen, setMoveOpen] = useState(false);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 12px", flexWrap: "wrap" }}>
       <button onClick={onToggle} style={selectMode ? dashPrimary : dashSecondary}>{selectMode ? "Done selecting" : "Select"}</button>
       {selectMode && <span style={{ color: T.text4, fontSize: 12 }}>{selectedCount} selected</span>}
+      {selectMode && <button onClick={onSelectAll} style={dashSecondary}>Select all</button>}
       {selectMode && selectedCount > 0 && (
         <>
           <button onClick={() => setMoveOpen((v) => !v)} style={dashSecondary}>Move to folder</button>
@@ -1097,7 +1129,7 @@ function BulkToolbar({ selectMode, selectedCount, onToggle, folders, onMove, onD
 const settingsInput = { width: "100%", padding: "10px 12px", background: "rgba(255,255,255,0.06)", border: `1px solid ${T.border}`, borderRadius: 10, color: T.text1, fontSize: 13, outline: "none" };
 
 
-function Dashboard({ isMobile, allItems, folders, folderCards, recentGalleries, totalViews, continueItems, recentlyViewed, recentlyAdded, topRatedItems, userData, onOpen, onNavigate, onQuickAdd, onImport, onCreateGallery, cardProps }) {
+function Dashboard({ isMobile, allItems, folders, folderCards, recentGalleries, totalViews, continueItems, recentlyViewed, recentlyAdded, topRatedItems, mostOiledItems = [], userData, onOpen, onNavigate, onQuickAdd, onImport, onCreateGallery, cardProps }) {
   const cardMode = isMobile ? "grid" : "grid";
   const primary = continueItems[0] || recentlyViewed[0] || recentlyAdded[0] || null;
   const compactStats = `${allItems.length} saved · ${folders.length} folders · ${totalViews} views`;
@@ -1131,6 +1163,7 @@ function Dashboard({ isMobile, allItems, folders, folderCards, recentGalleries, 
 
       <GalleryDashboardRow title="Recent Galleries" empty="Open a gallery and it will appear here." galleries={(recentGalleries.length ? recentGalleries : folderCards).slice(0, 6)} onOpenGallery={(name) => onNavigate(`folder:${name}`)} onCreateGallery={onCreateGallery} />
       <DashboardRow title="Continue Watching" empty="No active videos yet." items={continueItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("continue")} />
+      {mostOiledItems.length > 0 && <DashboardRow title="Most Oiled" empty="" items={mostOiledItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />}
       {topRatedItems.length > 0 && <DashboardRow title="Rated Media" empty="" items={topRatedItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("rated")} />}
       <DashboardRow title="Recently Added" empty="Your newest saves appear here." items={recentlyAdded.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
     </div>
@@ -1195,7 +1228,7 @@ function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef,
   );
 }
 
-function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall }) {
+function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall, showFilterPills, onToggleFilters }) {
   const [showSortDrop, setShowSortDrop] = useState(false);
   return (
     <div style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100, gap: 12, flexWrap: "wrap" }}>
@@ -1226,6 +1259,7 @@ function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onVie
             </button>
           ))}
         </div>
+        <button onClick={onToggleFilters} style={{ ...iconBtn, borderRadius: 7, background: showFilterPills ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)" }} title="Show filters"><Icon name="filter" size={16} /></button>
         <button onClick={onImport} style={{ ...iconBtn, borderRadius: 7 }} title="Import Sheet"><Icon name="import" size={16} /></button>
         <button onClick={onQuickAdd} style={{ ...iconBtn, borderRadius: 7 }} title="Add video"><Icon name="addCircle" size={16} /></button>
         {installPrompt && <button onClick={onInstall} style={{ ...iconBtn, borderRadius: 7 }} title="Install app"><Icon name="download" size={15} /></button>}

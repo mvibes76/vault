@@ -46,7 +46,7 @@ function loadTwitterWidgets(cb) {
 
 // ─── Main Player ────────────────────────────────────────────────────────────
 
-export default function Player({ item, items = [], currentIdx = 0, onNavigate, onClose, userId, resumeAt = 0, rating = 0, onRate, onAddMoment }) {
+export default function Player({ item, items = [], currentIdx = 0, onNavigate, onClose, userId, resumeAt = 0, rating = 0, onRate, onAddMoment, oilCount = 0, onOil }) {
   const [muted, setMuted]   = useState(false);
   const [isPiP, setIsPiP]   = useState(false);
   const [parent, setParent] = useState("localhost");
@@ -431,8 +431,9 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     e?.stopPropagation?.();
     const id = Date.now() + Math.random();
     setOilBursts((prev) => [...prev.slice(-3), { id }]);
-    setTimeout(() => setOilBursts((prev) => prev.filter((b) => b.id !== id)), 900);
-  }, []);
+    onOil?.();
+    setTimeout(() => setOilBursts((prev) => prev.filter((b) => b.id !== id)), 1050);
+  }, [onOil]);
 
   const openPopout = useCallback(() => {
     const target = (embed?.kind === "video" || embed?.kind === "hls") ? (mediaSrc || embed.src) :
@@ -674,7 +675,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <button onClick={handleClose} style={ctrlBtn} title="Close"><Icon name="x" size={15} /></button>
       </div>
       {markNotice && <div style={markToast}>{markNotice}</div>}
-      <style jsx global>{`@keyframes vaultOil { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2) rotate(-10deg); } 35% { opacity: 0.94; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(2.05) rotate(18deg); } }`}</style>
+      <style jsx global>{`@keyframes vaultWeb { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.12) rotate(-12deg); filter: blur(8px); } 18% { opacity: 0.98; filter: blur(0.6px); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(3.8) rotate(10deg); filter: blur(3px); } }`}</style>
 
       {/* Title chip (bottom) */}
       {item.title && (
@@ -698,12 +699,13 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       <button
         onClick={triggerOil}
         style={oilBtn}
-        title="Oil the vault"
-        aria-label="Oil the vault"
+        title="Web splash"
+        aria-label="Web splash"
       >
-        <span style={{ fontSize: 18, lineHeight: 1 }}>◒</span>
+        <span style={{ fontSize: 18, lineHeight: 1 }}>✦</span>
+        {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
       </button>
-      {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, transform: `translate(-50%, -50%) scale(${1 + idx * 0.08})` }} />)}
+      {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, transform: `translate(-50%, -50%) scale(${1 + idx * 0.1})` }} />)}
 
       <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
       {showComments && (
@@ -1163,15 +1165,19 @@ const zoomBtn = {
 };
 
 const oilBtn = {
-  position: "absolute", right: 18, top: "52%", transform: "translateY(-50%)", zIndex: 6,
-  width: 52, height: 52, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.16)",
-  background: "radial-gradient(circle at 35% 25%, rgba(255,244,214,0.96), rgba(198,159,93,0.72) 45%, rgba(98,63,32,0.56))",
-  color: "#1a1208", boxShadow: "0 12px 36px rgba(0,0,0,0.48)", cursor: "pointer", display: "grid", placeItems: "center",
+  position: "absolute", right: 18, bottom: 86, zIndex: 8,
+  width: 54, height: 54, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.28)",
+  background: "radial-gradient(circle at 34% 24%, #ffffff, rgba(255,255,255,0.86) 42%, rgba(220,220,220,0.56))",
+  color: "#080808", boxShadow: "0 14px 42px rgba(0,0,0,0.48)", cursor: "pointer", display: "grid", placeItems: "center",
+};
+const oilCountBadge = {
+  position: "absolute", right: -5, top: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
+  background: "#fff", color: "#000", border: "1px solid rgba(0,0,0,0.18)", fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center",
 };
 const oilSplash = {
-  position: "absolute", right: 44, top: "52%", zIndex: 5,
-  width: 130, height: 130, borderRadius: "50% 46% 52% 40%",
+  position: "absolute", left: "50%", top: "50%", zIndex: 7,
+  width: "min(76vw, 720px)", height: "min(76vw, 720px)", borderRadius: "54% 46% 62% 38%",
   pointerEvents: "none",
-  background: "radial-gradient(circle at 38% 38%, rgba(255,245,218,0.86), rgba(215,180,116,0.42) 42%, rgba(133,86,45,0.10) 70%, transparent 74%)",
-  filter: "blur(1px)", animation: "vaultOil 0.78s ease-out forwards",
+  background: "radial-gradient(ellipse at 32% 55%, rgba(255,255,255,0.98) 0 7%, transparent 8%), radial-gradient(ellipse at 56% 42%, rgba(255,255,255,0.92) 0 5%, transparent 6%), radial-gradient(ellipse at 22% 74%, rgba(255,255,255,0.95) 0 11%, transparent 12%), conic-gradient(from 220deg, transparent 0 7%, rgba(255,255,255,0.98) 8% 12%, transparent 13% 22%, rgba(255,255,255,0.92) 23% 27%, transparent 28% 42%, rgba(255,255,255,0.96) 43% 48%, transparent 49% 100%)",
+  mixBlendMode: "screen", opacity: 0, animation: "vaultWeb 0.86s cubic-bezier(.16,.84,.2,1) forwards",
 };

@@ -192,3 +192,9 @@ create index if not exists idx_vault_folders_last_viewed on vault_folders(user_i
 -- v25: nested gallery buckets and bulk organization. Safe to rerun.
 alter table vault_folders add column if not exists parent_folder text;
 create index if not exists idx_vault_folders_parent on vault_folders(user_id, parent_folder);
+
+-- v26: web splash / most oiled tracking
+alter table user_data add column if not exists oil_count int default 0;
+alter table user_data add column if not exists last_oiled_at timestamptz;
+create index if not exists idx_user_data_oil_count on user_data(user_id, oil_count);
+create index if not exists idx_user_data_last_oiled on user_data(user_id, last_oiled_at);
