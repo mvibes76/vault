@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { T } from "@/lib/theme";
+import { getThumbCandidates } from "@/lib/sources";
+import { normalizeCoverUrl, proxiedMediaUrl } from "@/lib/utils";
 
 function labelForItem(item) {
   return item?.title || item?.name || item?.url || "Untitled";
@@ -27,6 +29,48 @@ function ratingForItem(item, userData) {
 function shortText(text, max = 54) {
   const s = String(text || "").replace(/\s+/g, " ").trim();
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+
+function isProbablyImageUrl(url) {
+  return /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(String(url || ""));
+}
+
+function xrImageCandidates(item) {
+  const out = [];
+  if (item?.thumbnail) out.push(proxiedMediaUrl(normalizeCoverUrl(item.thumbnail)));
+  if (isProbablyImageUrl(item?.url)) out.push(proxiedMediaUrl(normalizeCoverUrl(item.url)));
+  for (const candidate of getThumbCandidates(item?.url || "")) out.push(candidate);
+  return [...new Set(out.filter(Boolean))];
+}
+
+function XRPreviewImage({ item, large = false }) {
+  const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+  const candidates = xrImageCandidates(item);
+  const src = candidates[idx];
+  if (!src || dead) {
+    return (
+      <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "linear-gradient(145deg, rgba(255,255,255,.10), rgba(255,255,255,.03))" }}>
+        <div style={{ textAlign: "center", padding: 14 }}>
+          <div style={{ fontSize: large ? 34 : 18, fontWeight: 950, color: "#fff" }}>{kindForItem(item)}</div>
+          <div style={{ marginTop: 8, color: T.text4, fontSize: large ? 13 : 10, fontWeight: 800 }}>No preview image</div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      onError={() => {
+        const next = idx + 1;
+        if (next < candidates.length) setIdx(next);
+        else setDead(true);
+      }}
+      style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: `${item?.cover_position_x || 50}% ${item?.cover_position_y || 50}%`, display: "block" }}
+    />
+  );
 }
 
 function buildShelves(folders = [], items = []) {
@@ -216,6 +260,10 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
   const [selectedItem, setSelectedItem] = useState(0);
   const [mode, setMode] = useState("wall");
   const [escHint, setEscHint] = useState(false);
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
+  const [calibration, setCalibration] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("vv_xr_calibration") || "{}") || {}; } catch { return {}; }
+  });
 
   const shelfRef = useRef(0);
   const lastEscRef = useRef(0);
@@ -231,6 +279,9 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
   useEffect(() => { shelfRef.current = selectedShelf; }, [selectedShelf]);
   useEffect(() => { itemRef.current = selectedItem; }, [selectedItem]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => {
+    try { localStorage.setItem("vv_xr_calibration", JSON.stringify(calibration || {})); } catch {}
+  }, [calibration]);
 
   function requestEscapeClose() {
     const now = Date.now();
@@ -370,7 +421,7 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
 
     sessionRef.current = session;
     setRunning(true);
-    setStatus("VR running. Select = next media. Squeeze = next shelf. Use overlay controls to open.");
+    setStatus("VR running. Point at overlay cards when available. Trigger opens selected. Squeeze cycles shelves.");
 
     const baseLayer = new XRWebGLLayer(session, gl);
     session.updateRenderState({ baseLayer });
@@ -401,7 +452,7 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
     rebuild();
     glCleanupRef.current = () => textures.forEach((t) => t.tex && gl.deleteTexture(t.tex));
 
-    const handleSelect = () => { nextItem(); setTimeout(rebuild, 0); };
+    const handleSelect = () => { openActiveItem(); };
     const handleSqueeze = () => { nextShelf(); setTimeout(rebuild, 0); };
     session.addEventListener("select", handleSelect);
     session.addEventListener("squeeze", handleSqueeze);
@@ -498,18 +549,34 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
               </div>
             </div>
 
-            <div style={{ border: "1px solid rgba(255,255,255,.12)", background: "linear-gradient(135deg, rgba(255,255,255,.08), rgba(255,255,255,.025))", borderRadius: 28, overflow: "hidden", position: "relative", minHeight: 320, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "inset 0 0 80px rgba(255,255,255,.025)" }}>
-              <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 10%, rgba(255,255,255,.10), transparent 42%)" }} />
-              {activeItem ? (
-                <div style={{ position: "relative", zIndex: 1, width: "min(720px, 92%)", textAlign: "center", padding: 20 }}>
-                  <div style={{ width: "min(380px, 72vw)", aspectRatio: "4 / 5", margin: "0 auto 18px", borderRadius: 26, border: "1px solid rgba(255,255,255,.18)", background: "linear-gradient(145deg, rgba(255,255,255,.16), rgba(255,255,255,.035))", display: "grid", placeItems: "center", boxShadow: "0 30px 90px rgba(0,0,0,.5)" }}>
-                    <div>
-                      <div style={{ fontSize: 12, color: T.text4, fontWeight: 900, letterSpacing: 1.2, marginBottom: 10 }}>{kindForItem(activeItem)}</div>
-                      <div style={{ fontSize: 24, color: "#fff", fontWeight: 950, letterSpacing: -0.8, padding: "0 24px" }}>{shortText(labelForItem(activeItem), 62)}</div>
-                      {!!ratingForItem(activeItem, userData) && <div style={{ marginTop: 12, color: "#fff", fontSize: 15 }}>★ {ratingForItem(activeItem, userData)}</div>}
-                    </div>
+            <div style={{ border: "1px solid rgba(255,255,255,.12)", background: "radial-gradient(circle at 50% 5%, rgba(255,255,255,.12), rgba(255,255,255,.03) 42%, rgba(0,0,0,.22))", borderRadius: 28, overflow: "hidden", position: "relative", minHeight: 390, display: "grid", placeItems: "center", boxShadow: "inset 0 0 80px rgba(255,255,255,.025)", padding: mode === "wall" ? 18 : 24 }}>
+              <div style={{ position: "absolute", top: 18, left: "50%", width: "68%", height: 1, transform: "translateX(-50%)", background: "linear-gradient(90deg, transparent, rgba(255,255,255,.32), transparent)" }} />
+              <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse at 50% 50%, transparent 38%, rgba(0,0,0,.28) 100%)" }} />
+
+              {activeItems.length ? mode === "wall" ? (
+                <div style={{ position: "relative", zIndex: 1, width: "100%", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: 12, alignItems: "stretch", transform: "perspective(900px) rotateX(1deg)", transformOrigin: "center" }}>
+                  {activeItems.slice(0, 18).map((item, idx) => {
+                    const selected = idx === selectedItem;
+                    return (
+                      <button key={item.key || idx} onClick={() => { setSelectedItem(idx); itemRef.current = idx; }} onDoubleClick={() => { itemRef.current = idx; openActiveItem(); }} style={{ minHeight: 152, borderRadius: 18, overflow: "hidden", border: selected ? "2px solid rgba(255,255,255,.78)" : "1px solid rgba(255,255,255,.12)", background: selected ? "rgba(255,255,255,.13)" : "rgba(255,255,255,.045)", color: "#fff", textAlign: "left", padding: 0, cursor: "pointer", boxShadow: selected ? "0 20px 70px rgba(255,255,255,.14)" : "0 14px 50px rgba(0,0,0,.28)", transform: selected ? "translateY(-4px) scale(1.015)" : "translateY(0)", transition: "transform .16s ease, border-color .16s ease" }}>
+                        <div style={{ height: 108, background: "#050506" }}><XRPreviewImage item={item} /></div>
+                        <div style={{ padding: "9px 10px 10px" }}>
+                          <div style={{ fontSize: 9, color: T.text4, fontWeight: 900, letterSpacing: .7 }}>{kindForItem(item)}</div>
+                          <div style={{ fontSize: 11, fontWeight: 900, lineHeight: 1.15, marginTop: 4 }}>{shortText(labelForItem(item), 35)}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ position: "relative", zIndex: 1, width: "min(760px, 94%)", display: "grid", gridTemplateColumns: "minmax(180px, 300px) minmax(0, 1fr)", gap: 18, alignItems: "center" }} className="xr-cinema-grid">
+                  <div style={{ aspectRatio: "4 / 5", borderRadius: 28, overflow: "hidden", border: "1px solid rgba(255,255,255,.2)", boxShadow: "0 35px 110px rgba(0,0,0,.58)", background: "#050506" }}><XRPreviewImage item={activeItem} large /></div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: T.text4, fontSize: 12, fontWeight: 900, letterSpacing: 1.2 }}>{kindForItem(activeItem)}</div>
+                    <div style={{ color: "#fff", fontSize: 31, lineHeight: 1, letterSpacing: -1.2, fontWeight: 950, marginTop: 8 }}>{shortText(labelForItem(activeItem), 80)}</div>
+                    {!!ratingForItem(activeItem, userData) && <div style={{ marginTop: 12, color: "#fff", fontSize: 15 }}>★ {ratingForItem(activeItem, userData)}</div>}
+                    <button onClick={openActiveItem} style={{ ...xrButton(true), marginTop: 18, minWidth: 190 }}>Open in Vault</button>
                   </div>
-                  <button onClick={openActiveItem} style={{ ...xrButton(true), width: "min(320px, 100%)" }}>Open in Vault</button>
                 </div>
               ) : (
                 <div style={{ position: "relative", zIndex: 1, textAlign: "center", padding: 24 }}>
@@ -519,11 +586,14 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
               )}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 8, marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(86px, 1fr))", gap: 8, marginTop: 12 }}>
               {activeItems.slice(0, 10).map((item, idx) => (
-                <button key={item.key || idx} onClick={() => { setSelectedItem(idx); itemRef.current = idx; }} style={{ minHeight: 70, borderRadius: 14, border: idx === selectedItem ? "1px solid rgba(255,255,255,.65)" : "1px solid rgba(255,255,255,.10)", background: idx === selectedItem ? "rgba(255,255,255,.14)" : "rgba(255,255,255,.045)", color: "#fff", textAlign: "left", padding: 10, cursor: "pointer" }}>
-                  <div style={{ fontSize: 10, color: T.text4, fontWeight: 800 }}>{kindForItem(item)}</div>
-                  <div style={{ fontSize: 11, fontWeight: 800, marginTop: 4, lineHeight: 1.2 }}>{shortText(labelForItem(item), 32)}</div>
+                <button key={item.key || idx} onClick={() => { setSelectedItem(idx); itemRef.current = idx; }} style={{ minHeight: 72, borderRadius: 14, border: idx === selectedItem ? "1px solid rgba(255,255,255,.65)" : "1px solid rgba(255,255,255,.10)", background: idx === selectedItem ? "rgba(255,255,255,.14)" : "rgba(255,255,255,.045)", color: "#fff", textAlign: "left", padding: 0, overflow: "hidden", cursor: "pointer", display: "grid", gridTemplateColumns: "42px 1fr" }}>
+                  <div style={{ height: "100%", background: "#050506" }}><XRPreviewImage item={item} /></div>
+                  <div style={{ padding: 8, minWidth: 0 }}>
+                    <div style={{ fontSize: 9, color: T.text4, fontWeight: 800 }}>{kindForItem(item)}</div>
+                    <div style={{ fontSize: 11, fontWeight: 850, marginTop: 4, lineHeight: 1.2, overflow: "hidden" }}>{shortText(labelForItem(item), 28)}</div>
+                  </div>
                 </button>
               ))}
             </div>
@@ -536,12 +606,25 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
               <button onClick={nextShelf} style={xrButton(false)}>Next shelf</button>
               <button onClick={nextItem} style={xrButton(false)}>Next media</button>
               <button onClick={openActiveItem} disabled={!activeItem} style={xrButton(Boolean(activeItem))}>Open selected</button>
+              <button onClick={() => setCalibrationOpen((v) => !v)} style={xrButton(false)}>Controller calibration</button>
             </div>
+            {calibrationOpen && (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 16, border: "1px solid rgba(255,255,255,.11)", background: "rgba(255,255,255,.045)", display: "grid", gap: 10 }}>
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: 13 }}>Aim calibration</div>
+                {[['x','Horizontal'], ['y','Vertical'], ['scale','Pointer scale']].map(([key,label]) => (
+                  <label key={key} style={{ display: "grid", gap: 5, color: T.text3, fontSize: 11, fontWeight: 800 }}>
+                    {label}: {Number(calibration?.[key] ?? (key === 'scale' ? 100 : 0))}
+                    <input type="range" min={key === 'scale' ? 70 : -50} max={key === 'scale' ? 140 : 50} value={calibration?.[key] ?? (key === 'scale' ? 100 : 0)} onChange={(e) => setCalibration((c) => ({ ...c, [key]: Number(e.target.value) }))} />
+                  </label>
+                ))}
+                <button onClick={() => setCalibration({ x: 0, y: 0, scale: 100 })} style={xrSmallButton}>Reset calibration</button>
+              </div>
+            )}
             <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,.10)", paddingTop: 14, color: T.text3, fontSize: 13, lineHeight: 1.55 }}>
               <div style={{ color: "#fff", fontWeight: 850, marginBottom: 4 }}>Quest controls</div>
-              <div>Select cycles media.</div>
+              <div>Trigger opens the selected media.</div>
               <div>Squeeze cycles shelves.</div>
-              <div>Overlay buttons work when DOM Overlay is available.</div>
+              <div>Point at DOM overlay cards/buttons when available.</div>
               <div>Desktop preview: arrows move, Enter opens, M toggles, Esc twice exits.</div>
               <div style={{ marginTop: 10, color: T.text4 }}>{status}</div>
             </div>
@@ -552,6 +635,7 @@ export default function VaultXR({ items = [], folders = [], userData = {}, onClo
       <style jsx>{`
         @media (max-width: 920px) {
           .xr-shell-grid { grid-template-columns: 1fr !important; }
+          .xr-cinema-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>
