@@ -429,14 +429,220 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
   const splashCanvasRef = useRef(null);
   const splashAnimRef   = useRef(null);
-  const [splashZone, setSplashZone] = useState("C"); // TL | TR | C | BL | BR
+  const [splashZone, setSplashZone] = useState("C");
+  const [paintMode, setPaintMode]   = useState("paint"); // "paint" | "slap"
+  const [slapHand, setSlapHand]     = useState("R");     // "L" | "R"
 
-  // Zone → fractional screen position
   const ZONES = {
     TL: [0.22, 0.25], TR: [0.78, 0.25],
     C:  [0.50, 0.48],
     BL: [0.22, 0.72], BR: [0.78, 0.72],
   };
+
+  // ── Hand slap animation ────────────────────────────────────────────────────
+  const triggerSlap = useCallback((e) => {
+    e?.stopPropagation?.();
+    onOil?.();
+
+    const canvas = splashCanvasRef.current;
+    if (!canvas) return;
+    const W = canvas.width  = window.innerWidth;
+    const H = canvas.height = window.innerHeight;
+    const ctx = canvas.getContext("2d");
+    if (splashAnimRef.current) cancelAnimationFrame(splashAnimRef.current);
+
+    const [zx, zy] = ZONES[splashZone] || ZONES.C;
+    const tx = W * zx;
+    const ty = H * zy;
+    const isLeft = slapHand === "L";
+
+    // Hand SVG path helpers — draw a stylised hand as filled bezier shapes
+    // We draw on canvas using Path2D-style manual bezier calls
+    // Hand faces toward screen, fingers spread, palm hits flat
+
+    // Palm dimensions
+    const palmW = 80;
+    const palmH = 68;
+
+    // Finger definitions [tipX, tipY, baseL, baseR] relative to palm center
+    const fingers = isLeft ? [
+      { dx: -34, dy: -72, w: 14, tilt: -0.35 }, // pinky
+      { dx: -14, dy: -90, w: 16, tilt: -0.12 }, // ring
+      { dx:   8, dy: -96, w: 18, tilt:  0.04 }, // middle
+      { dx:  28, dy: -88, w: 17, tilt:  0.18 }, // index
+      { dx:  52, dy: -52, w: 14, tilt:  0.7  }, // thumb (spread)
+    ] : [
+      { dx:  34, dy: -72, w: 14, tilt:  0.35 },
+      { dx:  14, dy: -90, w: 16, tilt:  0.12 },
+      { dx:  -8, dy: -96, w: 18, tilt: -0.04 },
+      { dx: -28, dy: -88, w: 17, tilt: -0.18 },
+      { dx: -52, dy: -52, w: 14, tilt: -0.7  },
+    ];
+
+    // Animation phases:
+    // 0.0–0.18  hand flies in from off-screen
+    // 0.18–0.26 smack + impact flash
+    // 0.26–0.55 hand recoils back
+    // 0.26+     red handprint stays, fades slowly
+    const SMACK_T  = 0.20;
+    const RECOIL_T = 0.52;
+    const born = performance.now();
+    const DUR  = 900; // ms total
+
+    // Impact mark: randomise slightly
+    const markRot   = (Math.random() - 0.5) * 0.25;
+    const markScale = 0.88 + Math.random() * 0.24;
+
+    function drawHand(hx, hy, alpha, scale = 1) {
+      ctx.save();
+      ctx.translate(hx, hy);
+      ctx.scale(scale, scale);
+
+      const skinColor = `rgba(240,200,160,${alpha})`;
+      const shadowColor = `rgba(180,120,80,${alpha * 0.6})`;
+
+      // Palm
+      ctx.beginPath();
+      ctx.ellipse(0, 0, palmW * 0.5, palmH * 0.5, 0, 0, Math.PI * 2);
+      ctx.fillStyle = skinColor;
+      ctx.shadowColor = `rgba(0,0,0,${alpha * 0.35})`;
+      ctx.shadowBlur  = 12;
+      ctx.fill();
+      ctx.shadowBlur  = 0;
+
+      // Palm crease lines
+      ctx.beginPath();
+      ctx.moveTo(-28, -8); ctx.quadraticCurveTo(0, -18, 26, -6);
+      ctx.strokeStyle = shadowColor;
+      ctx.lineWidth = 1.5; ctx.lineCap = "round"; ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-22, 6); ctx.quadraticCurveTo(0, 2, 20, 10);
+      ctx.stroke();
+
+      // Fingers
+      fingers.forEach((f) => {
+        ctx.save();
+        ctx.translate(f.dx * 0.5, -palmH * 0.3);
+        ctx.rotate(f.tilt);
+        const fh = 42 + Math.random() * 4;
+        // Finger body
+        ctx.beginPath();
+        ctx.moveTo(-f.w * 0.5, 0);
+        ctx.quadraticCurveTo(-f.w * 0.6, -fh * 0.5, -f.w * 0.45, -fh);
+        ctx.quadraticCurveTo(0, -fh - 4, f.w * 0.45, -fh);
+        ctx.quadraticCurveTo(f.w * 0.6, -fh * 0.5, f.w * 0.5, 0);
+        ctx.closePath();
+        ctx.fillStyle = skinColor;
+        ctx.fill();
+        // Knuckle line
+        ctx.beginPath();
+        ctx.moveTo(-f.w * 0.4, -fh * 0.28);
+        ctx.quadraticCurveTo(0, -fh * 0.32, f.w * 0.4, -fh * 0.28);
+        ctx.strokeStyle = shadowColor;
+        ctx.lineWidth = 1.2; ctx.stroke();
+        // Fingernail
+        ctx.beginPath();
+        ctx.ellipse(0, -fh + 5, f.w * 0.32, 6, 0, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,230,200,${alpha * 0.85})`;
+        ctx.fill();
+        ctx.restore();
+      });
+
+      ctx.restore();
+    }
+
+    function drawHandprint(px, py, alpha) {
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(markRot);
+      ctx.scale(markScale, markScale);
+
+      const red = `rgba(190,30,30,${alpha})`;
+      const darkRed = `rgba(140,10,10,${alpha * 0.7})`;
+
+      // Palm print — slightly irregular ellipse
+      ctx.beginPath();
+      ctx.ellipse(0, 8, palmW * 0.48, palmH * 0.44, 0, 0, Math.PI * 2);
+      ctx.fillStyle = red;
+      ctx.fill();
+
+      // Finger prints
+      fingers.forEach((f) => {
+        ctx.save();
+        ctx.translate(f.dx * 0.5, -palmH * 0.22);
+        ctx.rotate(f.tilt);
+        ctx.beginPath();
+        ctx.ellipse(0, -26, f.w * 0.42, 14, 0, 0, Math.PI * 2);
+        ctx.fillStyle = red;
+        ctx.fill();
+        // Fingerprint swirl hint
+        ctx.beginPath();
+        ctx.arc(0, -26, f.w * 0.22, 0, Math.PI * 1.4);
+        ctx.strokeStyle = darkRed;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      // Skin texture — subtle veins/lines
+      ctx.beginPath();
+      ctx.moveTo(-20, -2); ctx.quadraticCurveTo(-5, 8, 18, 4);
+      ctx.moveTo(-15, 10); ctx.quadraticCurveTo(2, 16, 20, 12);
+      ctx.strokeStyle = darkRed;
+      ctx.lineWidth = 1; ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function draw(now) {
+      const t = Math.min(1, (now - born) / DUR);
+      ctx.clearRect(0, 0, W, H);
+
+      if (t < RECOIL_T) {
+        // Fly-in: ease in from off-screen side
+        const flyT = Math.min(1, t / SMACK_T);
+        const eased = 1 - Math.pow(1 - flyT, 3); // ease-out cubic
+        const offX  = isLeft ? -W * 0.55 : W * 0.55;
+        const startY = ty - H * 0.3;
+        const hx = tx + offX * (1 - eased);
+        const hy = ty + (startY - ty) * (1 - eased) - (t < SMACK_T ? 0 : (t - SMACK_T) * H * 0.8);
+        const handAlpha = Math.min(1, flyT * 2.5);
+        const squeeze   = t < SMACK_T ? (1 + eased * 0.12) : (1 - (t - SMACK_T) * 1.8);
+
+        drawHand(hx, hy, handAlpha, Math.max(0.1, squeeze));
+
+        // Impact flash at SMACK_T
+        if (t >= SMACK_T && t < SMACK_T + 0.08) {
+          const flashT = (t - SMACK_T) / 0.08;
+          const flashA = (1 - flashT) * 0.7;
+          const flashR = 60 + flashT * 80;
+          const fg = ctx.createRadialGradient(tx, ty, 0, tx, ty, flashR);
+          fg.addColorStop(0,   `rgba(255,230,200,${flashA})`);
+          fg.addColorStop(0.5, `rgba(255,100,80,${flashA * 0.5})`);
+          fg.addColorStop(1,   `rgba(255,50,30,0)`);
+          ctx.beginPath();
+          ctx.arc(tx, ty, flashR, 0, Math.PI * 2);
+          ctx.fillStyle = fg;
+          ctx.fill();
+        }
+      }
+
+      // Handprint — appears at SMACK_T and slowly fades
+      if (t >= SMACK_T) {
+        const printAge  = (t - SMACK_T) / (1 - SMACK_T);
+        const printAlpha = Math.max(0, 1 - printAge * 0.55); // stays visible long
+        drawHandprint(tx, ty, printAlpha);
+      }
+
+      if (t < 1) {
+        splashAnimRef.current = requestAnimationFrame(draw);
+      } else {
+        ctx.clearRect(0, 0, W, H);
+      }
+    }
+
+    splashAnimRef.current = requestAnimationFrame(draw);
+  }, [onOil, splashZone, slapHand]);
 
   const triggerOil = useCallback((e) => {
     e?.stopPropagation?.();
@@ -918,39 +1124,70 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         </button>
       )}
 
-      {/* Zone selector + oil button */}
-      <div style={{ position: "absolute", right: 16, bottom: 18, zIndex: 9, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-        {/* 3×3 zone grid — corners + center selectable */}
+      {/* Paint / Slap panel */}
+      <div style={{ position: "absolute", right: 16, bottom: 18, zIndex: 9, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+
+        {/* Mode toggle: Paint | Slap */}
+        <div style={{ display: "flex", gap: 3, background: "rgba(0,0,0,0.45)", borderRadius: 8, padding: 3 }}>
+          {["paint", "slap"].map((m) => (
+            <button key={m} onClick={(e) => { e.stopPropagation(); setPaintMode(m); }} style={{
+              border: "none", cursor: "pointer", borderRadius: 6, padding: "3px 8px",
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+              background: paintMode === m ? "rgba(255,255,255,0.9)" : "transparent",
+              color: paintMode === m ? "#000" : "rgba(255,255,255,0.6)",
+              transition: "all 0.15s",
+            }}>
+              {m === "paint" ? "💧" : "👋"} {m.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {/* Zone grid — shared by both modes */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,18px)", gap: 3 }}>
           {[
             ["TL",""],["",""],["TR",""],
             ["",""],["C",""],["",""],
             ["BL",""],["",""],["BR",""],
           ].map(([zone], idx) => zone ? (
-            <button
-              key={zone}
-              onClick={(e) => { e.stopPropagation(); setSplashZone(zone); }}
-              style={{
-                width: 18, height: 18, borderRadius: 4, border: "none", cursor: "pointer",
-                background: splashZone === zone
-                  ? "rgba(255,255,255,0.9)"
-                  : "rgba(255,255,255,0.18)",
-                transition: "background 0.15s",
-              }}
-              title={zone}
-            />
+            <button key={zone} onClick={(e) => { e.stopPropagation(); setSplashZone(zone); }} style={{
+              width: 18, height: 18, borderRadius: 4, border: "none", cursor: "pointer",
+              background: splashZone === zone ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.18)",
+              transition: "background 0.15s",
+            }} title={zone} />
           ) : (
             <div key={idx} style={{ width: 18, height: 18 }} />
           ))}
         </div>
-        {/* Shoot button */}
+
+        {/* Hand selector — only shown in slap mode */}
+        {paintMode === "slap" && (
+          <div style={{ display: "flex", gap: 4 }}>
+            {["L", "R"].map((h) => (
+              <button key={h} onClick={(e) => { e.stopPropagation(); setSlapHand(h); }} style={{
+                width: 32, height: 26, border: "none", cursor: "pointer", borderRadius: 6,
+                fontSize: 11, fontWeight: 800,
+                background: slapHand === h ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.18)",
+                color: slapHand === h ? "#000" : "rgba(255,255,255,0.7)",
+                transform: h === "L" ? "scaleX(-1)" : "none",
+                transition: "all 0.15s",
+              }}>
+                {h === "L" ? "🤚" : "🤚"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Action button */}
         <button
-          onClick={triggerOil}
+          onClick={paintMode === "slap" ? triggerSlap : triggerOil}
           style={oilBtn}
-          title="Shoot"
-          aria-label="Shoot paint"
+          title={paintMode === "slap" ? "Slap" : "Shoot"}
+          aria-label={paintMode === "slap" ? "Slap" : "Shoot paint"}
         >
-          <span style={oilDropIcon} />
+          {paintMode === "slap"
+            ? <span style={{ fontSize: 22, lineHeight: 1 }}>👋</span>
+            : <span style={oilDropIcon} />
+          }
           {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
         </button>
       </div>
@@ -1421,7 +1658,7 @@ const zoomBtn = {
 };
 
 const oilBtn = {
-  position: "absolute", right: 22, bottom: 24, zIndex: 9,
+  position: "relative", zIndex: 9,
   width: 46, height: 46, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.34)",
   background: "radial-gradient(circle at 35% 27%, #fff 0 18%, rgba(255,255,255,0.86) 42%, rgba(255,255,255,0.42) 100%)",
   color: "#080808", boxShadow: "0 16px 38px rgba(0,0,0,0.44), inset 0 1px 9px rgba(255,255,255,0.7)", cursor: "pointer", display: "grid", placeItems: "center",
