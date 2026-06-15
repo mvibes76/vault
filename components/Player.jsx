@@ -429,6 +429,14 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
   const splashCanvasRef = useRef(null);
   const splashAnimRef   = useRef(null);
+  const [splashZone, setSplashZone] = useState("C"); // TL | TR | C | BL | BR
+
+  // Zone → fractional screen position
+  const ZONES = {
+    TL: [0.22, 0.25], TR: [0.78, 0.25],
+    C:  [0.50, 0.48],
+    BL: [0.22, 0.72], BR: [0.78, 0.72],
+  };
 
   const triggerOil = useCallback((e) => {
     e?.stopPropagation?.();
@@ -441,12 +449,12 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     const ctx = canvas.getContext("2d");
     if (splashAnimRef.current) cancelAnimationFrame(splashAnimRef.current);
 
-    // Impact point: center-ish of screen
-    const cx = W * 0.5 + (Math.random() - 0.5) * W * 0.1;
-    const cy = H * 0.46 + (Math.random() - 0.5) * H * 0.08;
+    // Impact point driven by selected zone + small random jitter
+    const [zx, zy] = ZONES[splashZone] || ZONES.C;
+    const cx = W * zx + (Math.random() - 0.5) * W * 0.06;
+    const cy = H * zy + (Math.random() - 0.5) * H * 0.05;
 
-    // ── Blob lobes — drawn with radial gradients composited with "lighter"
-    // so overlapping lobes merge into one bright organic mass ─────────────────
+    // ── Blob lobes — radial gradients composited "lighter" = merged organic mass
     const lobes = Array.from({ length: 7 + Math.floor(Math.random() * 5) }, (_, i) => {
       const a = (i / 7) * Math.PI * 2 + (Math.random() - 0.5) * 1.2;
       const d = i === 0 ? 0 : 12 + Math.random() * 32;
@@ -462,15 +470,22 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       };
     });
 
-    // ── Arms: straight tapered strokes, fat-to-thin, NO curves at end ────────
+    // ── Arms: quadratic bezier curves — organic, pinched in middle, liquid feel
     const arms = Array.from({ length: 8 + Math.floor(Math.random() * 6) }, () => {
       const a   = Math.random() * Math.PI * 2;
       const len = 55 + Math.random() * 110;
+      // Control point offset: perpendicular to arm direction for natural curve
+      const perpA = a + Math.PI * 0.5 * (Math.random() > 0.5 ? 1 : -1);
+      const cpDist = 20 + Math.random() * 50;
+      const cpT    = 0.35 + Math.random() * 0.3; // where along arm the control point is
       return {
         ax: cx, ay: cy,
         ex: cx + Math.cos(a) * len,
-        ey: cy + Math.sin(a) * len + 18 + Math.random() * 20, // slight gravity droop
-        w: 5 + Math.random() * 12,
+        ey: cy + Math.sin(a) * len + 14 + Math.random() * 18,
+        // Quadratic control point — pulls the arm into an organic curve
+        cpx: cx + Math.cos(a) * len * cpT + Math.cos(perpA) * cpDist,
+        cpy: cy + Math.sin(a) * len * cpT + Math.sin(perpA) * cpDist,
+        w: 5 + Math.random() * 13,
         prog: 0,
         speed: 0.06 + Math.random() * 0.06,
         life: 1,
@@ -479,7 +494,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       };
     });
 
-    // ── Droplets ──────────────────────────────────────────────────────────────
+    // ── Droplets ─────────────────────────────────────────────────────────────
     const drops = Array.from({ length: 40 + Math.floor(Math.random() * 30) }, () => {
       const a = Math.random() * Math.PI * 2;
       const spd = 2 + Math.random() * 18;
@@ -495,7 +510,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       };
     });
 
-    // ── Drips: 4-6 thin vertical threads that grow downward ──────────────────
+    // ── Drips: thin vertical threads growing downward ─────────────────────────
     const drips = Array.from({ length: 4 + Math.floor(Math.random() * 3) }, () => ({
       x: cx + (Math.random() - 0.5) * 80,
       y: cy + 20 + Math.random() * 30,
@@ -513,26 +528,27 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       const age = (now - born) / 1000;
       ctx.clearRect(0, 0, W, H);
 
-      // ── Central blob mass via composited radial gradients ─────────────────
+      // ── Central blob mass — lighter composite for merged blobby look ─────
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       lobes.forEach((l) => {
         if (l.life <= 0) return;
         l.vy += l.grav;
-        l.x  += l.vx;  l.y += l.vy;
-        l.vx *= 0.96;  l.vy *= 0.96;
+        l.x  += l.vx; l.y += l.vy;
+        l.vx *= 0.96; l.vy *= 0.96;
         l.life -= l.decay;
         const a = Math.max(0, l.life);
         const r = l.r * (0.5 + a * 0.5);
+        // Offset highlight for 3D sheen — light source top-left
         const grd = ctx.createRadialGradient(
-          l.x - r * 0.25, l.y - r * 0.25, r * 0.02,
+          l.x - r * 0.3, l.y - r * 0.3, r * 0.02,
           l.x, l.y, r
         );
-        // Bright white core fading to transparent — "lighter" blend merges them
-        grd.addColorStop(0,   `rgba(255,255,255,${a * 0.85})`);
-        grd.addColorStop(0.45,`rgba(248,250,255,${a * 0.65})`);
-        grd.addColorStop(0.75,`rgba(230,240,255,${a * 0.28})`);
-        grd.addColorStop(1,   `rgba(200,220,255,0)`);
+        grd.addColorStop(0,    `rgba(255,255,255,${a * 0.95})`);  // bright highlight
+        grd.addColorStop(0.18, `rgba(252,254,255,${a * 0.88})`);  // sheen ring
+        grd.addColorStop(0.45, `rgba(235,245,255,${a * 0.62})`);  // mid body
+        grd.addColorStop(0.75, `rgba(210,230,255,${a * 0.25})`);  // edge shadow
+        grd.addColorStop(1,    `rgba(180,210,255,0)`);
         ctx.beginPath();
         ctx.arc(l.x, l.y, r, 0, Math.PI * 2);
         ctx.fillStyle = grd;
@@ -540,59 +556,78 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       });
       ctx.restore();
 
-      // ── Arms ──────────────────────────────────────────────────────────────
+      // ── Arms — quadratic bezier, tapered by stepping segments ────────────
       arms.forEach((arm) => {
         if (arm.life <= 0) return;
         arm.prog  = Math.min(1, arm.prog + arm.speed);
         arm.life -= arm.decay;
         const p  = arm.prog;
         const al = arm.life;
-        const ex = arm.ax + (arm.ex - arm.ax) * p;
-        const ey = arm.ay + (arm.ey - arm.ay) * p;
 
-        // Tapered: draw as gradient-stroked path
-        const gr = ctx.createLinearGradient(arm.ax, arm.ay, ex, ey);
-        gr.addColorStop(0,   `rgba(255,255,255,${al * 0.95})`);
-        gr.addColorStop(0.6, `rgba(255,255,255,${al * 0.7})`);
-        gr.addColorStop(1,   `rgba(255,255,255,0)`);
+        // Step along quadratic bezier to draw tapered segments
+        const steps = 20;
+        for (let i = 0; i < steps; i++) {
+          const t0 = (i / steps) * p;
+          const t1 = Math.min(p, ((i + 1) / steps) * p);
+          if (t1 <= t0) break;
+          // Quadratic bezier point B(t) = (1-t)²·P0 + 2(1-t)t·CP + t²·P1
+          const bx0 = (1-t0)*(1-t0)*arm.ax + 2*(1-t0)*t0*arm.cpx + t0*t0*arm.ex;
+          const by0 = (1-t0)*(1-t0)*arm.ay + 2*(1-t0)*t0*arm.cpy + t0*t0*arm.ey;
+          const bx1 = (1-t1)*(1-t1)*arm.ax + 2*(1-t1)*t1*arm.cpx + t1*t1*arm.ex;
+          const by1 = (1-t1)*(1-t1)*arm.ay + 2*(1-t1)*t1*arm.cpy + t1*t1*arm.ey;
 
-        ctx.beginPath();
-        ctx.moveTo(arm.ax, arm.ay);
-        ctx.lineTo(ex, ey);
-        ctx.strokeStyle = gr;
-        ctx.lineWidth   = Math.max(0.5, arm.w * (1 - p * 0.7) * al);
-        ctx.lineCap     = "round";
-        ctx.stroke();
+          // Viscous pinch: thinnest at ~40% of length (surface tension effect)
+          const pinch = 1 - Math.pow(Math.abs(t0 - 0.4) * 1.8, 1.5) * 0.35;
+          const w = Math.max(0.4, arm.w * (1 - t0 * 0.82) * pinch * al);
 
-        // Tip bead
-        if (p > 0.55) {
           ctx.beginPath();
-          ctx.arc(ex, ey, arm.tipR * al * (p - 0.4), 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${al * 0.88})`;
+          ctx.moveTo(bx0, by0);
+          ctx.lineTo(bx1, by1);
+          ctx.strokeStyle = `rgba(255,255,255,${al * (1 - t0 * 0.45)})`;
+          ctx.lineWidth   = w;
+          ctx.lineCap     = "round";
+          ctx.stroke();
+        }
+
+        // Tip bead — blob at end of arm
+        if (p > 0.55) {
+          const tipX = (1-p)*(1-p)*arm.ax + 2*(1-p)*p*arm.cpx + p*p*arm.ex;
+          const tipY = (1-p)*(1-p)*arm.ay + 2*(1-p)*p*arm.cpy + p*p*arm.ey;
+          const tipGrd = ctx.createRadialGradient(tipX - arm.tipR*0.3, tipY - arm.tipR*0.3, 0.5, tipX, tipY, arm.tipR * al);
+          tipGrd.addColorStop(0, `rgba(255,255,255,${al * 0.95})`);
+          tipGrd.addColorStop(1, `rgba(255,255,255,0)`);
+          ctx.beginPath();
+          ctx.arc(tipX, tipY, arm.tipR * al * Math.min(1, (p - 0.4) * 2), 0, Math.PI * 2);
+          ctx.fillStyle = tipGrd;
           ctx.fill();
         }
       });
 
-      // ── Droplets ──────────────────────────────────────────────────────────
+      // ── Droplets ─────────────────────────────────────────────────────────
       drops.forEach((d) => {
         if (d.life <= 0) return;
         d.vy += d.grav; d.x += d.vx * 0.97; d.y += d.vy; d.vx *= 0.98;
         d.life -= d.decay;
+        // Small sheen on each droplet
+        const dr = Math.max(0.4, d.r * d.life);
+        const dg = ctx.createRadialGradient(d.x - dr*0.3, d.y - dr*0.3, 0.2, d.x, d.y, dr);
+        dg.addColorStop(0, `rgba(255,255,255,${d.life * 0.95})`);
+        dg.addColorStop(1, `rgba(220,235,255,0)`);
         ctx.beginPath();
-        ctx.arc(d.x, d.y, Math.max(0.4, d.r * d.life), 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,255,255,${d.life * 0.9})`;
+        ctx.arc(d.x, d.y, dr, 0, Math.PI * 2);
+        ctx.fillStyle = dg;
         ctx.fill();
       });
 
-      // ── Drips ─────────────────────────────────────────────────────────────
+      // ── Drips ────────────────────────────────────────────────────────────
       drips.forEach((dr) => {
         if (dr.life <= 0) return;
         dr.len   = Math.min(dr.maxLen, dr.len + dr.spd * (1 + age * 0.3));
         dr.life -= dr.decay;
         const dg = ctx.createLinearGradient(dr.x, dr.y, dr.x, dr.y + dr.len);
-        dg.addColorStop(0,   `rgba(255,255,255,${dr.life * 0.9})`);
-        dg.addColorStop(0.65,`rgba(255,255,255,${dr.life * 0.45})`);
-        dg.addColorStop(1,   `rgba(255,255,255,0)`);
+        dg.addColorStop(0,    `rgba(255,255,255,${dr.life * 0.9})`);
+        dg.addColorStop(0.65, `rgba(255,255,255,${dr.life * 0.45})`);
+        dg.addColorStop(1,    `rgba(255,255,255,0)`);
         ctx.beginPath();
         ctx.moveTo(dr.x, dr.y);
         ctx.lineTo(dr.x, dr.y + dr.len);
@@ -620,7 +655,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     }
 
     splashAnimRef.current = requestAnimationFrame(draw);
-  }, [onOil]);
+  }, [onOil, splashZone]);
 
   const openPopout = useCallback(() => {
     const target = (embed?.kind === "video" || embed?.kind === "hls") ? (mediaSrc || embed.src) :
@@ -883,15 +918,42 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         </button>
       )}
 
-      <button
-        onClick={triggerOil}
-        style={oilBtn}
-        title="Web squirt"
-        aria-label="Web squirt"
-      >
-        <span style={oilDropIcon} />
-        {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
-      </button>
+      {/* Zone selector + oil button */}
+      <div style={{ position: "absolute", right: 16, bottom: 18, zIndex: 9, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+        {/* 3×3 zone grid — corners + center selectable */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,18px)", gap: 3 }}>
+          {[
+            ["TL",""],["",""],["TR",""],
+            ["",""],["C",""],["",""],
+            ["BL",""],["",""],["BR",""],
+          ].map(([zone], idx) => zone ? (
+            <button
+              key={zone}
+              onClick={(e) => { e.stopPropagation(); setSplashZone(zone); }}
+              style={{
+                width: 18, height: 18, borderRadius: 4, border: "none", cursor: "pointer",
+                background: splashZone === zone
+                  ? "rgba(255,255,255,0.9)"
+                  : "rgba(255,255,255,0.18)",
+                transition: "background 0.15s",
+              }}
+              title={zone}
+            />
+          ) : (
+            <div key={idx} style={{ width: 18, height: 18 }} />
+          ))}
+        </div>
+        {/* Shoot button */}
+        <button
+          onClick={triggerOil}
+          style={oilBtn}
+          title="Shoot"
+          aria-label="Shoot paint"
+        >
+          <span style={oilDropIcon} />
+          {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
+        </button>
+      </div>
       <canvas
         ref={splashCanvasRef}
         style={{
