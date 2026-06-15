@@ -11,12 +11,12 @@ function NavItem({ id, icon, label, count, activeView, collapsed, mobile, onNavi
       style={{
         display: "flex", alignItems: "center", gap: 9,
         width: "100%",
-        padding: collapsed ? "9px 0" : mobile ? "11px 14px" : "7px 12px",
+        padding: collapsed ? "9px 0" : mobile ? "12px 14px" : "8px 10px",
         justifyContent: collapsed ? "center" : "flex-start",
         background: active ? "rgba(255,255,255,0.08)" : "transparent",
         border: "none", borderRadius: T.r6,
         color: active ? T.text1 : T.text3,
-        cursor: "pointer", fontSize: mobile ? 15 : 13,
+        cursor: "pointer", fontSize: mobile ? 16 : 14,
         fontWeight: active ? 500 : 400,
         textAlign: "left", transition: "background 0.12s, color 0.12s",
         marginBottom: 1,
@@ -27,7 +27,7 @@ function NavItem({ id, icon, label, count, activeView, collapsed, mobile, onNavi
         <>
           <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
           {count !== undefined && count > 0 && (
-            <span style={{ fontSize: 10, color: T.text4, fontVariantNumeric: "tabular-nums" }}>{count}</span>
+            <span style={{ fontSize: mobile ? 12 : 11, color: T.text4, fontVariantNumeric: "tabular-nums", flexShrink: 0, minWidth: 18, textAlign: "right" }}>{count}</span>
           )}
         </>
       )}
@@ -83,7 +83,7 @@ function FolderTree({ folders, counts, activeView, collapsed, mobile, onNavigate
   const renderActions = (f, isChild = false) => {
     if (collapsed) return null;
     return (
-      <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+      <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
         {!isChild && (
           <button
             onClick={(e) => { e.stopPropagation(); onCreateGallery?.(f.name); setOpenParents((prev) => new Set(prev).add(folderKey(f.name))); }}
@@ -150,22 +150,22 @@ function FolderTree({ folders, counts, activeView, collapsed, mobile, onNavigate
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleParent(root.name); }}
                     title={open ? "Collapse" : "Expand"}
-                    style={{ ...folderActionBtn, width: 22 }}
+                    style={{ ...folderActionBtn, width: mobile ? 26 : 20 }}
                   >
                     <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
                   </button>
                 )}
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                   <NavItem id={`folder:${root.name}`} icon="folder" label={root.name} count={counts[`folder:${root.name}`]} activeView={activeView} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} onClose={onClose} />
                 </div>
                 {renderActions(root, false)}
               </div>
             )}
             {!collapsed && open && children.length > 0 && (
-              <div style={{ marginLeft: 22, paddingLeft: 8, borderLeft: `1px solid ${T.borderSub}` }}>
+              <div style={{ marginLeft: mobile ? 22 : 18, paddingLeft: mobile ? 8 : 6, borderLeft: `1px solid ${T.borderSub}` }}>
                 {children.map((child) => renderDropWrap(child,
                   <div style={{ display: "flex", alignItems: "center", gap: 4, width: "100%" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                       <NavItem id={`folder:${child.name}`} icon={child.kind === "gallery" ? "showcase" : "folder"} label={child.name} count={counts[`folder:${child.name}`]} activeView={activeView} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} onClose={onClose} />
                     </div>
                     {renderActions(child, true)}
@@ -198,14 +198,14 @@ export default function Sidebar({
       )}
 
       <aside style={{
-        width: mobile ? 270 : (collapsed ? 56 : 220),
+        width: mobile ? "min(360px, 92vw)" : (collapsed ? 56 : 292),
         background: "rgba(13,13,13,0.96)",
         backdropFilter: "blur(20px)",
         borderRight: `1px solid ${T.border}`,
-        padding: mobile ? "14px 10px" : "12px 9px",
+        padding: mobile ? "16px 12px" : "12px 10px",
         position: mobile ? "fixed" : "sticky",
         top: 0, bottom: 0,
-        left: mobile ? (open ? 0 : -290) : 0,
+        left: mobile ? (open ? 0 : "-380px") : 0,
         height: "100dvh",
         overflowY: "auto", flexShrink: 0,
         transition: "left 0.22s ease, width 0.18s",
@@ -308,7 +308,7 @@ export default function Sidebar({
 
 
 const folderActionBtn = {
-  width: 26, height: 28, borderRadius: 7, flexShrink: 0,
+  width: 22, height: 28, borderRadius: 7, flexShrink: 0,
   display: "flex", alignItems: "center", justifyContent: "center",
   background: "transparent", border: "none", color: T.text4, cursor: "pointer",
 };

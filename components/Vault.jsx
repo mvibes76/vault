@@ -10,7 +10,7 @@ import SheetImportModal from "./SheetImportModal";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule, proxiedMediaUrl, normalizeCoverUrl } from "@/lib/utils";
-import { SOURCE_OPTIONS } from "@/lib/sources";
+import { SOURCE_OPTIONS, getThumbCandidates } from "@/lib/sources";
 import {
   supabase, isSupabaseConfigured, getUserData, toggleFavorite,
   setItemFolder, getFolders, createFolder, deleteFolder, renameFolder, updateFolder, recordFolderView,
@@ -996,6 +996,49 @@ function OrganizerStrip({ isMobile, flatEverything, onToggleFlat, galleries, onO
   );
 }
 
+
+function imageCandidatesForItem(item) {
+  if (!item) return [];
+  const candidates = [];
+  const add = (url, proxy = true) => {
+    const raw = String(url || "").trim();
+    if (!raw) return;
+    const normalized = normalizeCoverUrl(raw);
+    const finalUrl = proxy && /^https?:\/\//i.test(normalized) ? proxiedMediaUrl(normalized) : normalized;
+    if (finalUrl && !candidates.includes(finalUrl)) candidates.push(finalUrl);
+  };
+  add(item.thumbnail);
+  const cleanUrl = String(item.url || "").split("?")[0].toLowerCase();
+  const type = String(item.type || item.source || "").toLowerCase();
+  if (type.includes("image") || sourceIdOf(item.url || "") === "image" || /\.(jpg|jpeg|png|webp|gif|avif)(\?|$)/i.test(item.url || cleanUrl)) {
+    add(item.url);
+  }
+  getThumbCandidates(item.url || "").forEach((url) => add(url, false));
+  return candidates;
+}
+
+function GalleryImage({ candidates = [], alt = "", fit = "cover", position = "center", fallbackIcon = "showcase", fallbackSize = 42, style = {} }) {
+  const [idx, setIdx] = useState(0);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setIdx(0); setFailed(false); }, [candidates.join("|")]);
+  const src = candidates[idx];
+  if (!src || failed) {
+    return <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: T.text4, ...style }}><Icon name={fallbackIcon} size={fallbackSize} /></div>;
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      onError={() => {
+        const next = idx + 1;
+        if (next < candidates.length) setIdx(next);
+        else setFailed(true);
+      }}
+      style={{ width: "100%", height: "100%", objectFit: fit, objectPosition: position, display: "block", background: "#050505", ...style }}
+    />
+  );
+}
+
 function GalleryGrid({ galleries, onOpenGallery, isMobile }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(auto-fill,minmax(240px,1fr))", gap: isMobile ? 10 : 16 }}>
@@ -1007,17 +1050,15 @@ function GalleryGrid({ galleries, onOpenGallery, isMobile }) {
 function GalleryCard({ gallery, onOpen, compact = false }) {
   const { folder, items, count, coverItem } = gallery;
   const displayAsGallery = folder.kind === "gallery" && !!folder.parent_folder;
-  const explicit = folder.cover ? proxiedMediaUrl(normalizeCoverUrl(folder.cover)) : "";
-  const itemThumb = coverItem?.thumbnail ? proxiedMediaUrl(normalizeCoverUrl(coverItem.thumbnail)) : "";
-  const src = explicit || itemThumb;
+  const explicit = folder.cover ? [proxiedMediaUrl(normalizeCoverUrl(folder.cover))] : [];
+  const itemCandidates = imageCandidatesForItem(coverItem);
+  const candidates = [...explicit, ...itemCandidates].filter(Boolean);
   const videoCount = items.filter((i) => String(i.type || i.source || "").toLowerCase().includes("video") || ["youtube","vimeo","drive","reddit","tiktok","hls"].includes(sourceIdOf(i.url))).length;
   const photoCount = items.filter((i) => String(i.type || i.source || "").toLowerCase().includes("image") || /\.(jpg|jpeg|png|webp|gif|avif)(\?|$)/i.test(i.url || "")).length;
   return (
     <button onClick={onOpen} style={{ textAlign: "left", border: `1px solid ${T.border}`, borderRadius: 18, overflow: "hidden", background: "linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025))", color: T.text1, cursor: "pointer", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", padding: 0 }}>
       <div style={{ aspectRatio: compact ? "16/10" : "4/5", position: "relative", background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
-        {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} /> : (
-          <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: T.text4 }}><Icon name="showcase" size={42} /></div>
-        )}
+        <GalleryImage candidates={candidates} fit="cover" position="center" fallbackIcon={displayAsGallery ? "showcase" : "folder"} fallbackSize={42} />
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.68))" }} />
         <div style={{ position: "absolute", left: 12, right: 12, bottom: 12 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", borderRadius: 999, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.12)", color: T.text2, fontSize: 10, marginBottom: 8 }}>
@@ -1037,11 +1078,11 @@ function SlideshowGallery({ items, onOpen, cardProps }) {
   useEffect(() => { if (idx >= items.length) setIdx(0); }, [items.length, idx]);
   const item = items[idx] || items[0];
   if (!item) return null;
-  const src = item.thumbnail ? proxiedMediaUrl(normalizeCoverUrl(item.thumbnail)) : "";
+  const candidates = imageCandidatesForItem(item);
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <button onClick={() => onOpen(item)} style={{ minHeight: 340, border: `1px solid ${T.border}`, borderRadius: 22, overflow: "hidden", background: "rgba(255,255,255,0.035)", color: T.text1, cursor: "pointer", position: "relative", padding: 0, textAlign: "left" }}>
-        {src ? <img src={src} alt="" style={{ width: "100%", height: "min(62dvh,620px)", objectFit: "contain", background: "#050505", display: "block" }} /> : <div style={{ height: "min(62dvh,620px)", display: "grid", placeItems: "center", color: T.text4 }}><Icon name="showcase" size={54} /></div>}
+        <div style={{ width: "100%", height: "min(62dvh,620px)", background: "#050505" }}><GalleryImage candidates={candidates} fit="contain" fallbackIcon="showcase" fallbackSize={54} /></div>
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 16, background: "linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.74))" }}>
           <div style={{ fontSize: 12, color: T.text4, marginBottom: 4 }}>{idx + 1} / {items.length}</div>
           <div style={{ fontSize: 18, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title || item.url}</div>

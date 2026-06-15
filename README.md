@@ -109,3 +109,7 @@ Run `sql/schema.sql` after deploying v24.
 ## v25
 
 Adds nested gallery buckets inside folders, folder expand-all mode, bulk selection actions, and the lightweight Vault Oil interaction in the media player. Run `sql/schema.sql` again to add `vault_folders.parent_folder`.
+
+## v28
+
+Gallery and slideshow image rendering now uses a safer fallback chain so image URLs without generated thumbnails still display instead of showing a broken image icon.
