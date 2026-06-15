@@ -441,264 +441,175 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     const ctx = canvas.getContext("2d");
     if (splashAnimRef.current) cancelAnimationFrame(splashAnimRef.current);
 
-    // ── Splash origin: center-screen (where the mass lands) ─────────────────
-    const cx = W * 0.5 + (Math.random() - 0.5) * W * 0.15;
-    const cy = H * 0.48 + (Math.random() - 0.5) * H * 0.12;
+    // Impact point: center-ish of screen
+    const cx = W * 0.5 + (Math.random() - 0.5) * W * 0.1;
+    const cy = H * 0.46 + (Math.random() - 0.5) * H * 0.08;
 
-    // ── Metaball nodes — these form the blobby central mass ─────────────────
-    // Each node is a sphere of influence; where fields overlap the surface merges
-    const nodes = Array.from({ length: 14 + Math.floor(Math.random() * 8) }, (_, i) => {
-      const angle = (i / 14) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
-      const dist  = i === 0 ? 0 : 20 + Math.random() * 55;
+    // ── Blob lobes — drawn with radial gradients composited with "lighter"
+    // so overlapping lobes merge into one bright organic mass ─────────────────
+    const lobes = Array.from({ length: 7 + Math.floor(Math.random() * 5) }, (_, i) => {
+      const a = (i / 7) * Math.PI * 2 + (Math.random() - 0.5) * 1.2;
+      const d = i === 0 ? 0 : 12 + Math.random() * 32;
       return {
-        x: cx + Math.cos(angle) * dist,
-        y: cy + Math.sin(angle) * dist,
-        // Each node pulses outward from center
-        vx: i === 0 ? 0 : Math.cos(angle) * (1.2 + Math.random() * 2.8),
-        vy: i === 0 ? 0 : Math.sin(angle) * (1.2 + Math.random() * 2.8) - Math.random() * 1.2,
-        r: i === 0 ? 52 + Math.random() * 28 : 18 + Math.random() * 28,
+        x: cx + Math.cos(a) * d,
+        y: cy + Math.sin(a) * d,
+        vx: i === 0 ? 0 : Math.cos(a) * (0.6 + Math.random() * 1.4),
+        vy: i === 0 ? 0 : Math.sin(a) * (0.6 + Math.random() * 1.4),
+        r: i === 0 ? 38 + Math.random() * 18 : 12 + Math.random() * 22,
         life: 1,
-        decay: i === 0 ? 0.004 : 0.007 + Math.random() * 0.006,
-        gravity: 0.04 + Math.random() * 0.06,
+        decay: i === 0 ? 0.012 : 0.016 + Math.random() * 0.01,
+        grav: 0.06 + Math.random() * 0.08,
       };
     });
 
-    // ── Tendrils — curved bezier arms shooting outward ───────────────────────
-    const tendrils = Array.from({ length: 10 + Math.floor(Math.random() * 8) }, () => {
-      const angle  = Math.random() * Math.PI * 2;
-      const len    = 80 + Math.random() * 180;
-      const ctrl1A = angle + (Math.random() - 0.5) * 1.0;
-      const ctrl2A = angle + (Math.random() - 0.5) * 0.6;
+    // ── Arms: straight tapered strokes, fat-to-thin, NO curves at end ────────
+    const arms = Array.from({ length: 8 + Math.floor(Math.random() * 6) }, () => {
+      const a   = Math.random() * Math.PI * 2;
+      const len = 55 + Math.random() * 110;
       return {
-        angle, len,
-        progress: 0,             // 0→1 how far the tendril has extended
-        speed: 0.022 + Math.random() * 0.018,
-        baseW: 8 + Math.random() * 18,
-        ctrl1: { dx: Math.cos(ctrl1A) * len * 0.4, dy: Math.sin(ctrl1A) * len * 0.4 },
-        ctrl2: { dx: Math.cos(ctrl2A) * len * 0.75, dy: Math.sin(ctrl2A) * len * 0.75 + Math.random() * 30 },
-        endDx: Math.cos(angle) * len,
-        endDy: Math.sin(angle) * len + Math.random() * 40, // gravity droop at tip
+        ax: cx, ay: cy,
+        ex: cx + Math.cos(a) * len,
+        ey: cy + Math.sin(a) * len + 18 + Math.random() * 20, // slight gravity droop
+        w: 5 + Math.random() * 12,
+        prog: 0,
+        speed: 0.06 + Math.random() * 0.06,
         life: 1,
-        decay: 0.005 + Math.random() * 0.004,
-        tipR: 2 + Math.random() * 6,
-        hasBead: Math.random() > 0.45,
+        decay: 0.018 + Math.random() * 0.01,
+        tipR: 3 + Math.random() * 5,
       };
     });
 
-    // ── Micro-droplets scattered all over ────────────────────────────────────
-    const droplets = Array.from({ length: 80 + Math.floor(Math.random() * 50) }, () => {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 3 + Math.random() * 32;
+    // ── Droplets ──────────────────────────────────────────────────────────────
+    const drops = Array.from({ length: 40 + Math.floor(Math.random() * 30) }, () => {
+      const a = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 18;
       return {
-        x: cx + (Math.random() - 0.5) * 60,
-        y: cy + (Math.random() - 0.5) * 60,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - Math.random() * 8,
-        r: 1 + Math.random() * 9,
-        life: 0.6 + Math.random() * 0.4,
-        decay: 0.007 + Math.random() * 0.014,
-        gravity: 0.15 + Math.random() * 0.25,
-        splat: false, splatX: 0, splatY: 0, splatRx: 0, splatRy: 0,
+        x: cx + (Math.random() - 0.5) * 30,
+        y: cy + (Math.random() - 0.5) * 30,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd - Math.random() * 5,
+        r: 1.5 + Math.random() * 6,
+        life: 1,
+        decay: 0.016 + Math.random() * 0.016,
+        grav: 0.2 + Math.random() * 0.2,
       };
     });
 
-    // ── Drip threads — thin strings hanging down from mass ───────────────────
-    const drips = Array.from({ length: 5 + Math.floor(Math.random() * 6) }, () => ({
-      x: cx + (Math.random() - 0.5) * 120,
-      y: cy + 30 + Math.random() * 60,
-      w: 2 + Math.random() * 7,
+    // ── Drips: 4-6 thin vertical threads that grow downward ──────────────────
+    const drips = Array.from({ length: 4 + Math.floor(Math.random() * 3) }, () => ({
+      x: cx + (Math.random() - 0.5) * 80,
+      y: cy + 20 + Math.random() * 30,
+      w: 1.5 + Math.random() * 4,
       len: 0,
-      targetLen: 60 + Math.random() * 160,
-      speed: 0.8 + Math.random() * 2,
+      maxLen: 50 + Math.random() * 100,
+      spd: 1.2 + Math.random() * 2,
       life: 1,
-      decay: 0.004,
-      beads: Math.random() > 0.4,
+      decay: 0.009,
     }));
 
     const born = performance.now();
-
-    // ── Offscreen canvas for metaball field ──────────────────────────────────
-    // We render metaballs at 1/4 res for perf then scale up (still looks great)
-    const scale  = 0.22;
-    const mW     = Math.ceil(W * scale);
-    const mH     = Math.ceil(H * scale);
-    const offscreen = document.createElement("canvas");
-    offscreen.width  = mW;
-    offscreen.height = mH;
-    const mctx  = offscreen.getContext("2d");
-    const imgData = mctx.createImageData(mW, mH);
-    const pix     = imgData.data;
 
     function draw(now) {
       const age = (now - born) / 1000;
       ctx.clearRect(0, 0, W, H);
 
-      // ── Advance metaball nodes ─────────────────────────────────────────────
-      nodes.forEach((n) => {
-        n.vy += n.gravity;
-        n.x  += n.vx;
-        n.y  += n.vy;
-        n.vx *= 0.985;
-        n.vy *= 0.985;
-        n.life -= n.decay;
+      // ── Central blob mass via composited radial gradients ─────────────────
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      lobes.forEach((l) => {
+        if (l.life <= 0) return;
+        l.vy += l.grav;
+        l.x  += l.vx;  l.y += l.vy;
+        l.vx *= 0.96;  l.vy *= 0.96;
+        l.life -= l.decay;
+        const a = Math.max(0, l.life);
+        const r = l.r * (0.5 + a * 0.5);
+        const grd = ctx.createRadialGradient(
+          l.x - r * 0.25, l.y - r * 0.25, r * 0.02,
+          l.x, l.y, r
+        );
+        // Bright white core fading to transparent — "lighter" blend merges them
+        grd.addColorStop(0,   `rgba(255,255,255,${a * 0.85})`);
+        grd.addColorStop(0.45,`rgba(248,250,255,${a * 0.65})`);
+        grd.addColorStop(0.75,`rgba(230,240,255,${a * 0.28})`);
+        grd.addColorStop(1,   `rgba(200,220,255,0)`);
+        ctx.beginPath();
+        ctx.arc(l.x, l.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = grd;
+        ctx.fill();
       });
+      ctx.restore();
 
-      // ── Render metaball field pixel-by-pixel (downscaled) ─────────────────
-      const alive = nodes.filter((n) => n.life > 0.05);
-      if (alive.length > 0) {
-        for (let py = 0; py < mH; py++) {
-          for (let px = 0; px < mW; px++) {
-            // World coords
-            const wx = px / scale;
-            const wy = py / scale;
-            let field = 0;
-            for (let ni = 0; ni < alive.length; ni++) {
-              const n  = alive[ni];
-              const dx = wx - n.x;
-              const dy = wy - n.y;
-              const d2 = dx * dx + dy * dy;
-              const rr = n.r * n.r * n.life;
-              field += rr / (d2 + 0.001);
-            }
-            const idx = (py * mW + px) * 4;
-            if (field > 1.0) {
-              // Inside the blob — luminance based on field strength for 3D sheen
-              const intensity = Math.min(1, (field - 1) * 0.6 + 0.55);
-              // Highlight offset for 3D look — top-left is brighter
-              const hilight   = Math.min(1, intensity * 1.35);
-              pix[idx]     = Math.round(220 + hilight * 35);
-              pix[idx + 1] = Math.round(225 + hilight * 30);
-              pix[idx + 2] = Math.round(240 + hilight * 15);
-              pix[idx + 3] = Math.round(Math.min(255, intensity * 310));
-            } else {
-              pix[idx + 3] = 0;
-            }
-          }
-        }
-        mctx.putImageData(imgData, 0, 0);
+      // ── Arms ──────────────────────────────────────────────────────────────
+      arms.forEach((arm) => {
+        if (arm.life <= 0) return;
+        arm.prog  = Math.min(1, arm.prog + arm.speed);
+        arm.life -= arm.decay;
+        const p  = arm.prog;
+        const al = arm.life;
+        const ex = arm.ax + (arm.ex - arm.ax) * p;
+        const ey = arm.ay + (arm.ey - arm.ay) * p;
 
-        // Blit upscaled to main canvas with glow
-        ctx.save();
-        ctx.shadowColor = "rgba(255,255,255,0.55)";
-        ctx.shadowBlur  = 28;
-        ctx.drawImage(offscreen, 0, 0, W, H);
-        ctx.restore();
-      }
+        // Tapered: draw as gradient-stroked path
+        const gr = ctx.createLinearGradient(arm.ax, arm.ay, ex, ey);
+        gr.addColorStop(0,   `rgba(255,255,255,${al * 0.95})`);
+        gr.addColorStop(0.6, `rgba(255,255,255,${al * 0.7})`);
+        gr.addColorStop(1,   `rgba(255,255,255,0)`);
 
-      // ── Draw tendrils ──────────────────────────────────────────────────────
-      tendrils.forEach((t) => {
-        if (t.life <= 0) return;
-        t.progress = Math.min(1, t.progress + t.speed);
-        t.life    -= t.decay;
-        const p    = t.progress;
-        const alpha = t.life * 0.95;
+        ctx.beginPath();
+        ctx.moveTo(arm.ax, arm.ay);
+        ctx.lineTo(ex, ey);
+        ctx.strokeStyle = gr;
+        ctx.lineWidth   = Math.max(0.5, arm.w * (1 - p * 0.7) * al);
+        ctx.lineCap     = "round";
+        ctx.stroke();
 
-        // Bezier: start at cx,cy, curve out to the tip
-        // Draw as a thick-to-thin tapered stroke by stepping along the curve
-        const steps = 28;
-        for (let i = 0; i < steps - 1; i++) {
-          const t0 = (i / steps) * p;
-          const t1 = ((i + 1) / steps) * p;
-          // Cubic bezier point
-          const bx0 = Math.pow(1-t0,3)*cx + 3*Math.pow(1-t0,2)*t0*(cx+t.ctrl1.dx) + 3*(1-t0)*t0*t0*(cx+t.ctrl2.dx) + t0*t0*t0*(cx+t.endDx);
-          const by0 = Math.pow(1-t0,3)*cy + 3*Math.pow(1-t0,2)*t0*(cy+t.ctrl1.dy) + 3*(1-t0)*t0*t0*(cy+t.ctrl2.dy) + t0*t0*t0*(cy+t.endDy);
-          const bx1 = Math.pow(1-t1,3)*cx + 3*Math.pow(1-t1,2)*t1*(cx+t.ctrl1.dx) + 3*(1-t1)*t1*t1*(cx+t.ctrl2.dx) + t1*t1*t1*(cx+t.endDx);
-          const by1 = Math.pow(1-t1,3)*cy + 3*Math.pow(1-t1,2)*t1*(cy+t.ctrl1.dy) + 3*(1-t1)*t1*t1*(cy+t.ctrl2.dy) + t1*t1*t1*(cy+t.endDy);
-          const w   = t.baseW * (1 - t0 * 0.88) * alpha; // taper: fat at root, thin at tip
-
+        // Tip bead
+        if (p > 0.55) {
           ctx.beginPath();
-          ctx.moveTo(bx0, by0);
-          ctx.lineTo(bx1, by1);
-          ctx.strokeStyle = `rgba(255,255,255,${alpha * (1 - t0 * 0.5)})`;
-          ctx.lineWidth   = Math.max(0.4, w);
-          ctx.lineCap     = "round";
-          ctx.shadowColor = "rgba(255,255,255,0.35)";
-          ctx.shadowBlur  = 5;
-          ctx.stroke();
-          ctx.shadowBlur  = 0;
-        }
-
-        // Tip droplet / bead
-        if (p > 0.6 && t.hasBead) {
-          const tipX = cx + t.endDx * p;
-          const tipY = cy + t.endDy * p;
-          ctx.beginPath();
-          ctx.arc(tipX, tipY, t.tipR * alpha, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${alpha * 0.9})`;
+          ctx.arc(ex, ey, arm.tipR * al * (p - 0.4), 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${al * 0.88})`;
           ctx.fill();
         }
       });
 
-      // ── Draw micro-droplets ────────────────────────────────────────────────
-      droplets.forEach((d) => {
+      // ── Droplets ──────────────────────────────────────────────────────────
+      drops.forEach((d) => {
         if (d.life <= 0) return;
-        if (!d.splat) {
-          d.vy += d.gravity;
-          d.x  += d.vx * 0.97;
-          d.y  += d.vy;
-          d.vx *= 0.98;
-          d.life -= d.decay;
-
-          ctx.beginPath();
-          ctx.arc(d.x, d.y, Math.max(0.3, d.r * Math.min(1, d.life * 1.4)), 0, Math.PI * 2);
-          ctx.fillStyle   = `rgba(255,255,255,${d.life * 0.95})`;
-          ctx.shadowColor = "rgba(255,255,255,0.4)";
-          ctx.shadowBlur  = 3;
-          ctx.fill();
-          ctx.shadowBlur  = 0;
-
-          if (d.y > H - 20 || d.x < 8 || d.x > W - 8) {
-            d.splat  = true;
-            d.splatX = d.x; d.splatY = Math.min(d.y, H - 8);
-            d.splatRx = d.r * (2.5 + Math.random() * 2.5);
-            d.splatRy = d.r * (0.3 + Math.random() * 0.4);
-          }
-        } else {
-          d.life -= 0.004;
-          ctx.beginPath();
-          ctx.ellipse(d.splatX, d.splatY, d.splatRx, d.splatRy, 0, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${d.life * 0.65})`;
-          ctx.fill();
-        }
+        d.vy += d.grav; d.x += d.vx * 0.97; d.y += d.vy; d.vx *= 0.98;
+        d.life -= d.decay;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, Math.max(0.4, d.r * d.life), 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${d.life * 0.9})`;
+        ctx.fill();
       });
 
-      // ── Draw drip threads ──────────────────────────────────────────────────
+      // ── Drips ─────────────────────────────────────────────────────────────
       drips.forEach((dr) => {
         if (dr.life <= 0) return;
-        dr.len   = Math.min(dr.targetLen, dr.len + dr.speed * (1 + age * 0.5));
+        dr.len   = Math.min(dr.maxLen, dr.len + dr.spd * (1 + age * 0.3));
         dr.life -= dr.decay;
-        const alpha = dr.life;
-
-        if (dr.beads) {
-          const beadCount = Math.floor(dr.len / 12);
-          for (let i = 0; i <= beadCount; i++) {
-            const t  = i / Math.max(1, beadCount);
-            const bx = dr.x;
-            const by = dr.y + t * dr.len;
-            const br = dr.w * 0.55 * (1 - t * 0.45) * alpha;
-            ctx.beginPath();
-            ctx.arc(bx, by, Math.max(0.3, br), 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,255,${alpha * (1 - t * 0.6)})`;
-            ctx.fill();
-          }
-        } else {
-          const dg = ctx.createLinearGradient(dr.x, dr.y, dr.x, dr.y + dr.len);
-          dg.addColorStop(0,    `rgba(255,255,255,${alpha * 0.92})`);
-          dg.addColorStop(0.7,  `rgba(255,255,255,${alpha * 0.5})`);
-          dg.addColorStop(1,    `rgba(255,255,255,0)`);
-          ctx.beginPath();
-          ctx.moveTo(dr.x, dr.y);
-          ctx.lineTo(dr.x, dr.y + dr.len);
-          ctx.strokeStyle = dg;
-          ctx.lineWidth   = dr.w * alpha;
-          ctx.lineCap     = "round";
-          ctx.stroke();
-        }
+        const dg = ctx.createLinearGradient(dr.x, dr.y, dr.x, dr.y + dr.len);
+        dg.addColorStop(0,   `rgba(255,255,255,${dr.life * 0.9})`);
+        dg.addColorStop(0.65,`rgba(255,255,255,${dr.life * 0.45})`);
+        dg.addColorStop(1,   `rgba(255,255,255,0)`);
+        ctx.beginPath();
+        ctx.moveTo(dr.x, dr.y);
+        ctx.lineTo(dr.x, dr.y + dr.len);
+        ctx.strokeStyle = dg;
+        ctx.lineWidth   = dr.w * dr.life;
+        ctx.lineCap     = "round";
+        ctx.stroke();
+        // Bead at tip
+        ctx.beginPath();
+        ctx.arc(dr.x, dr.y + dr.len, dr.w * 0.9 * dr.life, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${dr.life * 0.7})`;
+        ctx.fill();
       });
 
-      const anyAlive = nodes.some((n) => n.life > 0)
-        || tendrils.some((t) => t.life > 0)
-        || droplets.some((d) => d.life > 0)
+      const anyAlive = lobes.some((l) => l.life > 0)
+        || arms.some((a) => a.life > 0)
+        || drops.some((d) => d.life > 0)
         || drips.some((dr) => dr.life > 0);
 
       if (anyAlive) {
