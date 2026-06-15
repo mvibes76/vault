@@ -430,9 +430,39 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const triggerOil = useCallback((e) => {
     e?.stopPropagation?.();
     const id = Date.now() + Math.random();
-    setOilBursts((prev) => [...prev.slice(-3), { id }]);
+    // Each burst gets randomised per-stream offsets so no two shots look identical
+    const burst = {
+      id,
+      seed: Math.random(),
+      yOff: Math.round((Math.random() - 0.5) * 28),
+      angle: -4 + Math.random() * 8,
+      streams: Array.from({ length: 3 + Math.floor(Math.random() * 2) }, (_, i) => ({
+        key: i,
+        yOff: Math.round((Math.random() - 0.5) * 36),
+        thickness: 7 + Math.random() * 11,
+        delay: i * 55 + Math.random() * 40,
+        speed: 0.62 + Math.random() * 0.22,
+        length: 0.52 + Math.random() * 0.34,
+      })),
+      droplets: Array.from({ length: 6 + Math.floor(Math.random() * 5) }, (_, i) => ({
+        key: i,
+        x: 12 + Math.random() * 72,
+        y: 20 + Math.random() * 55,
+        size: 4 + Math.random() * 10,
+        delay: 180 + Math.random() * 160,
+      })),
+      drips: Array.from({ length: 3 + Math.floor(Math.random() * 3) }, (_, i) => ({
+        key: i,
+        x: 8 + Math.random() * 80,
+        y: 45 + Math.random() * 25,
+        width: 3 + Math.random() * 6,
+        delay: 280 + i * 80 + Math.random() * 120,
+        speed: 0.9 + Math.random() * 0.7,
+      })),
+    };
+    setOilBursts((prev) => [...prev.slice(-2), burst]);
     onOil?.();
-    setTimeout(() => setOilBursts((prev) => prev.filter((b) => b.id !== id)), 1050);
+    setTimeout(() => setOilBursts((prev) => prev.filter((b) => b.id !== id)), 2200);
   }, [onOil]);
 
   const openPopout = useCallback(() => {
@@ -675,7 +705,29 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <button onClick={handleClose} style={ctrlBtn} title="Close"><Icon name="x" size={15} /></button>
       </div>
       {markNotice && <div style={markToast}>{markNotice}</div>}
-      <style jsx global>{`@keyframes vaultWebSquirt { 0% { opacity: 0; transform: translateX(64px) scaleX(0.08) scaleY(0.72) rotate(-8deg); filter: blur(5px); } 16% { opacity: 0.98; filter: blur(0.3px); } 62% { opacity: 0.86; transform: translateX(-18vw) scaleX(1.08) scaleY(1) rotate(-4deg); filter: blur(0.6px); } 100% { opacity: 0; transform: translateX(-24vw) scaleX(1.18) scaleY(1.08) rotate(-2deg); filter: blur(3px); } } @keyframes vaultWebDrip { 0% { transform: translateY(-7px); opacity: 0; } 28% { opacity: 0.92; } 100% { transform: translateY(28px); opacity: 0; } }`}</style>
+      <style jsx global>{`
+        @keyframes fluidStream {
+          0%   { opacity: 0; transform: scaleX(0) scaleY(0.4); filter: blur(4px); }
+          8%   { opacity: 1; filter: blur(0.5px); }
+          30%  { transform: scaleX(1.04) scaleY(1.15); }
+          55%  { transform: scaleX(1) scaleY(1); opacity: 0.97; }
+          80%  { opacity: 0.82; filter: blur(0.8px); }
+          100% { opacity: 0; transform: scaleX(1.02) scaleY(0.9); filter: blur(3px); }
+        }
+        @keyframes fluidDroplet {
+          0%   { opacity: 0; transform: scale(0.2) translateY(-6px); }
+          25%  { opacity: 1; transform: scale(1.15) translateY(0); }
+          65%  { opacity: 0.88; transform: scale(1) translateY(2px); }
+          100% { opacity: 0; transform: scale(0.85) translateY(5px); }
+        }
+        @keyframes fluidDrip {
+          0%   { height: 0; opacity: 0.9; }
+          18%  { opacity: 1; }
+          60%  { height: 38px; opacity: 0.82; }
+          85%  { height: 52px; opacity: 0.55; }
+          100% { height: 62px; opacity: 0; }
+        }
+      `}</style>
 
       {/* Title chip (bottom) */}
       {item.title && (
@@ -705,7 +757,62 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <span style={oilDropIcon} />
         {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
       </button>
-      {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, bottom: `${118 + idx * 8}px` }}><span style={oilDripOne} /><span style={oilDripTwo} /><span style={oilDripThree} /></div>)}
+      {oilBursts.map((burst) => (
+        <div key={burst.id} style={{
+          position: "absolute", right: 68, bottom: 80,
+          width: "min(55vw, 500px)", height: 180,
+          pointerEvents: "none", zIndex: 8,
+          transform: `rotate(${burst.angle}deg)`,
+        }}>
+          {burst.streams.map((s) => (
+            <div key={s.key} style={{
+              position: "absolute", right: 0,
+              top: `calc(50% + ${s.yOff}px)`,
+              width: `${Math.round(s.length * 100)}%`,
+              height: s.thickness,
+              transformOrigin: "right center",
+              borderRadius: `${s.thickness * 0.5}px 0 0 ${s.thickness * 0.5}px`,
+              background: `linear-gradient(90deg,
+                rgba(255,255,255,0) 0%,
+                rgba(255,255,255,0.4) 6%,
+                rgba(255,255,255,0.95) 22%,
+                rgba(255,255,255,1) 55%,
+                rgba(255,255,255,0.85) 78%,
+                rgba(255,255,255,0.3) 93%,
+                rgba(255,255,255,0) 100%)`,
+              filter: "blur(0.5px)",
+              mixBlendMode: "screen",
+              opacity: 0,
+              animation: `fluidStream ${s.speed}s ${s.delay}ms cubic-bezier(.08,.72,.18,1) forwards`,
+            }} />
+          ))}
+          {burst.droplets.map((d) => (
+            <div key={d.key} style={{
+              position: "absolute",
+              left: `${d.x}%`, top: `${d.y}%`,
+              width: d.size, height: d.size * 0.85,
+              borderRadius: "52% 48% 55% 45% / 50% 52% 48% 50%",
+              background: "rgba(255,255,255,0.94)",
+              filter: "blur(0.2px)",
+              mixBlendMode: "screen",
+              opacity: 0,
+              animation: `fluidDroplet 0.35s ${d.delay}ms ease-out forwards`,
+            }} />
+          ))}
+          {burst.drips.map((d) => (
+            <div key={d.key} style={{
+              position: "absolute",
+              left: `${d.x}%`, top: `${d.y}%`,
+              width: d.width, height: 0,
+              borderRadius: "0 0 50% 50%",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.35) 100%)",
+              mixBlendMode: "screen",
+              transformOrigin: "top center",
+              animation: `fluidDrip ${d.speed}s ${d.delay}ms cubic-bezier(.4,.05,.6,.95) forwards`,
+            }} />
+          ))}
+        </div>
+      ))}
 
       <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
       {showComments && (
@@ -1181,14 +1288,4 @@ const oilCountBadge = {
   position: "absolute", right: -5, top: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
   background: "#fff", color: "#000", border: "1px solid rgba(0,0,0,0.18)", fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center",
 };
-const oilSplash = {
-  position: "absolute", right: 54, zIndex: 8,
-  width: "min(46vw, 420px)", height: 128, borderRadius: "60% 36% 58% 42% / 42% 64% 36% 58%",
-  pointerEvents: "none",
-  background: "radial-gradient(ellipse at 7% 50%, rgba(255,255,255,0.98) 0 4%, transparent 5%), radial-gradient(ellipse at 22% 52%, rgba(255,255,255,0.96) 0 8%, transparent 9%), radial-gradient(ellipse at 42% 47%, rgba(255,255,255,0.92) 0 5%, transparent 6%), radial-gradient(ellipse at 68% 49%, rgba(255,255,255,0.94) 0 7%, transparent 8%), linear-gradient(92deg, transparent 0 7%, rgba(255,255,255,0.96) 10% 18%, transparent 20% 26%, rgba(255,255,255,0.88) 29% 54%, transparent 58% 63%, rgba(255,255,255,0.92) 67% 100%)",
-  mixBlendMode: "screen", opacity: 0, transformOrigin: "right center", animation: "vaultWebSquirt 0.78s cubic-bezier(.16,.84,.2,1) forwards",
-  filter: "drop-shadow(0 0 10px rgba(255,255,255,0.45))",
-};
-const oilDripOne = { position: "absolute", left: "24%", top: "58%", width: 6, height: 18, borderRadius: 999, background: "rgba(255,255,255,0.92)", animation: "vaultWebDrip 0.82s 0.12s ease-out forwards" };
-const oilDripTwo = { position: "absolute", left: "52%", top: "50%", width: 4, height: 15, borderRadius: 999, background: "rgba(255,255,255,0.82)", animation: "vaultWebDrip 0.78s 0.18s ease-out forwards" };
-const oilDripThree = { position: "absolute", left: "76%", top: "56%", width: 5, height: 22, borderRadius: 999, background: "rgba(255,255,255,0.88)", animation: "vaultWebDrip 0.9s 0.08s ease-out forwards" };
+// oilSplash / oilDrip* replaced by per-burst inline styles in fluidStream/fluidDroplet/fluidDrip keyframes
