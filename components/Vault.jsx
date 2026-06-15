@@ -7,6 +7,7 @@ import Sidebar from "./Sidebar";
 import BottomNav from "./BottomNav";
 import QuickAddModal from "./QuickAddModal";
 import SheetImportModal from "./SheetImportModal";
+import VaultXR from "./VaultXR";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule, proxiedMediaUrl, normalizeCoverUrl } from "@/lib/utils";
@@ -72,6 +73,8 @@ export default function Vault() {
   const [sidebarOpen, setSidebarOpen]           = useState(false);
   const [isMobile, setIsMobile]                 = useState(false);
   const [installPrompt, setInstallPrompt]       = useState(null);
+  const [xrSupported, setXrSupported]           = useState(false);
+  const [showXR, setShowXR]                     = useState(false);
 
   const [userData, setUserData] = useState({});
   const [folders, setFolders]   = useState([]);
@@ -116,6 +119,19 @@ export default function Vault() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [user]);
+
+  // WebXR Lite detection
+  useEffect(() => {
+    let alive = true;
+    const detect = async () => {
+      try {
+        const ok = !!navigator.xr && await navigator.xr.isSessionSupported("immersive-vr");
+        if (alive) setXrSupported(!!ok);
+      } catch { if (alive) setXrSupported(false); }
+    };
+    detect();
+    return () => { alive = false; };
+  }, []);
 
   // PWA install
   useEffect(() => {
@@ -271,7 +287,9 @@ export default function Vault() {
     return match?.name || null;
   }, [folders, canonicalFolderName]);
 
-  const allItems = useMemo(() => quickAdds.map(applyCoverRules), [quickAdds, applyCoverRules]);
+  const allItems = useMemo(() => (Array.isArray(quickAdds) ? quickAdds : [])
+    .filter((i) => i && (i.url || i.thumbnail) && i.key)
+    .map(applyCoverRules), [quickAdds, applyCoverRules]);
   const itemsForFolder = useCallback((name, items = allItems) => items.filter((i) => folderEquals(folderForItem(i), name)), [allItems, folderForItem]);
 
   // ── User actions ──────────────────────────────────────────────────────────
@@ -555,8 +573,8 @@ export default function Vault() {
       items = items.filter((i) =>
         i.title?.toLowerCase().includes(q) ||
         i.url?.toLowerCase().includes(q) ||
-        i.note?.toLowerCase().includes(q) ||
-        i.tags?.some((t) => t.includes(q))
+        String(i.note || "").toLowerCase().includes(q) ||
+        (Array.isArray(i.tags) && i.tags.some((t) => String(t || "").toLowerCase().includes(q)))
       );
     }
     if (activeView !== "continue") items = sortItems(items);
@@ -671,7 +689,7 @@ export default function Vault() {
     .sort((a, b) => Number(userData[b.key]?.oil_count || 0) - Number(userData[a.key]?.oil_count || 0))
     .slice(0, 8), [allItems, userData]);
   const totalViews = useMemo(() => allItems.reduce((sum, i) => sum + Number(userData[i.key]?.view_count || 0), 0), [allItems, userData]);
-  const folderCards = useMemo(() => folders.map((folder) => {
+  const folderCards = useMemo(() => folders.filter((folder) => folder?.name).map((folder) => {
     const items = itemsForFolder(folder.name);
     const coverItem = items.find((i) => i.thumbnail) || items[0];
     return { folder, items, count: items.length, coverItem };
@@ -687,6 +705,15 @@ export default function Vault() {
     .sort((a, b) => new Date(b.folder.last_viewed_at || 0) - new Date(a.folder.last_viewed_at || 0))
     .slice(0, 6), [folderCards]);
   const activeFolder = activeView.startsWith("folder:") ? folders.find((f) => folderEquals(f.name, activeView.slice(7))) : null;
+
+  useEffect(() => {
+    if (!activeView.startsWith("folder:")) return;
+    if (folders.length === 0) return;
+    const wanted = activeView.slice(7);
+    const exists = folders.some((f) => folderEquals(f.name, wanted));
+    if (!exists) setActiveView("all");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, folders]);
   const descendantFolderNames = useCallback((name) => {
     const seen = new Set();
     const walk = (parent) => {
@@ -745,6 +772,62 @@ export default function Vault() {
     setSelectedKeys(new Set()); setSelectMode(false);
   };
 
+  const makeBackupPayload = useCallback(() => ({
+    version: "v33",
+    exportedAt: new Date().toISOString(),
+    user: user ? { id: user.id, email: user.email } : null,
+    items: allItems,
+    folders,
+    userData,
+    coverLibrary,
+    settings: { sheetId, manualTabs, viewMode, coverRules },
+  }), [user, allItems, folders, userData, coverLibrary, sheetId, manualTabs, viewMode, coverRules]);
+
+  const downloadFile = useCallback((filename, mime, content) => {
+    try {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e.message || "Export failed.");
+    }
+  }, []);
+
+  const handleExportJSON = useCallback(() => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    downloadFile(`video-vault-backup-${stamp}.json`, "application/json", JSON.stringify(makeBackupPayload(), null, 2));
+  }, [downloadFile, makeBackupPayload]);
+
+  const handleExportCSV = useCallback(() => {
+    const cols = ["Title", "URL", "Folder", "Tags", "Notes", "Type", "Source", "Thumbnail", "Rating", "Views", "Last Viewed"];
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = allItems.map((i) => {
+      const d = userData[i.key] || {};
+      return [i.title, i.url, folderForItem(i), Array.isArray(i.tags) ? i.tags.join(", ") : "", i.note, i.type, i.source, i.thumbnail, d.rating || "", d.view_count || 0, d.last_viewed_at || ""].map(esc).join(",");
+    });
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    downloadFile(`video-vault-export-${stamp}.csv`, "text/csv", [cols.map(esc).join(","), ...rows].join("\n"));
+  }, [allItems, userData, folderForItem, downloadFile]);
+
+  const diagnostics = useMemo(() => ({
+    supabaseConfigured: isSupabaseConfigured(),
+    itemCount: allItems.length,
+    folderCount: folders.length,
+    rootFolderCount: folders.filter((f) => !f.parent_folder).length,
+    childFolderCount: folders.filter((f) => !!f.parent_folder).length,
+    coverCount: coverLibrary.length,
+    ratedCount: allItems.filter((i) => userData[i.key]?.rating).length,
+    viewCount: totalViews,
+    activeView,
+    isMobile,
+  }), [allItems, folders, coverLibrary, userData, totalViews, activeView, isMobile]);
+
   const cardProps = {
     userData,
     onToggleFavorite: handleToggleFavorite,
@@ -784,6 +867,8 @@ export default function Vault() {
             onSort={() => setShowSort(!showSort)} sortBy={sortBy}
             onImport={() => setShowImport(true)}
             onQuickAdd={() => setShowQuickAdd(true)}
+            xrSupported={xrSupported}
+            onEnterXR={() => setShowXR(true)}
           />
         ) : (
           <DesktopTopBar
@@ -795,6 +880,8 @@ export default function Vault() {
             onQuickAdd={() => setShowQuickAdd(true)}
             installPrompt={installPrompt} onInstall={handleInstall}
             showFilterPills={showFilterPills} onToggleFilters={() => setShowFilterPills((v) => !v)}
+            xrSupported={xrSupported}
+            onEnterXR={() => setShowXR(true)}
           />
         )}
 
@@ -948,10 +1035,11 @@ export default function Vault() {
 
       {isMobile && <BottomNav activeTab={activeBottomTab} onTab={handleBottomTab} />}
 
-      {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} coverRules={coverRules} onSaveCoverRules={handleSaveCoverRules} coverLibrary={coverLibrary} onSaveCover={handleSaveCover} onDeleteCover={handleDeleteCover} />}
+      {showConfig && <ConfigModal onSave={handleSaveConfig} onClose={() => !needsManualTabs && setShowConfig(false)} savedId={sheetId} needsManualTabs={needsManualTabs} coverRules={coverRules} onSaveCoverRules={handleSaveCoverRules} coverLibrary={coverLibrary} onSaveCover={handleSaveCover} onDeleteCover={handleDeleteCover} diagnostics={diagnostics} onExportJSON={handleExportJSON} onExportCSV={handleExportCSV} />}
       {showQuickAdd && <QuickAddModal onAdd={handleQuickAdd} onClose={() => setShowQuickAdd(false)} folders={folders} onCreateFolder={handleCreateFolder} />}
       {editingItem && <QuickAddModal mode="edit" initialItem={editingItem} onAdd={(item) => { handleQuickAdd(item); setEditingItem(null); }} onClose={() => setEditingItem(null)} folders={folders} onCreateFolder={handleCreateFolder} />}
       {showImport && <SheetImportModal onClose={() => setShowImport(false)} onImport={handleSheetImport} existingCount={quickAdds.length} />}
+      {showXR && <VaultXR items={allItems} folders={folders} userData={userData} onOpen={openItem} onClose={() => setShowXR(false)} />}
 
       {activeItem && (
         <Player
@@ -972,10 +1060,8 @@ export default function Vault() {
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        ::-webkit-scrollbar { width: 0; height: 0; }
         * { box-sizing: border-box; }
         button, a { -webkit-tap-highlight-color: transparent; }
-        :focus { outline: none; }
       `}</style>
     </div>
   );
@@ -1174,44 +1260,92 @@ const settingsInput = { width: "100%", padding: "10px 12px", background: "rgba(2
 function Dashboard({ isMobile, allItems, folders, folderCards, recentGalleries, totalViews, continueItems, recentlyViewed, recentlyAdded, topRatedItems, mostOiledItems = [], userData, onOpen, onNavigate, onQuickAdd, onImport, onCreateGallery, cardProps }) {
   const cardMode = isMobile ? "grid" : "grid";
   const primary = continueItems[0] || recentlyViewed[0] || recentlyAdded[0] || null;
-  const compactStats = `${allItems.length} saved · ${folders.length} folders · ${totalViews} views`;
+  const hasItems = allItems.length > 0;
+  const activeGalleryRows = recentGalleries.length ? recentGalleries : folderCards.slice(0, 6);
+  const visibleRows = [
+    { key: "continue", title: "Continue Watching", empty: "No active videos yet.", items: continueItems.slice(0, 6), seeAll: () => onNavigate("continue") },
+    { key: "watched", title: "Last Watched", empty: "Open media and it will show here.", items: recentlyViewed.slice(0, 6) },
+    { key: "liked", title: "Most Liked", empty: "Use the web-fluid action and the best media will rise here.", items: mostOiledItems.slice(0, 6) },
+    { key: "rated", title: "Rated Media", empty: "Rated media appears here.", items: topRatedItems.slice(0, 6), seeAll: () => onNavigate("rated") },
+    { key: "added", title: "Recently Added", empty: "Your newest saves appear here.", items: recentlyAdded.slice(0, 6) },
+  ].filter((row) => row.items.length > 0 || (!hasItems && row.key === "added"));
+
   return (
-    <div style={{ display: "grid", gap: isMobile ? 16 : 20 }}>
+    <div style={{ display: "grid", gap: isMobile ? 15 : 18 }}>
       <div style={{
-        border: `1px solid ${T.border}`, borderRadius: 22, padding: isMobile ? 16 : 22,
-        background: "linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0.025))",
-        boxShadow: "0 24px 70px rgba(0,0,0,0.22)", overflow: "hidden",
+        border: `1px solid ${T.border}`, borderRadius: isMobile ? 20 : 24, padding: isMobile ? 15 : 20,
+        background: "linear-gradient(145deg, rgba(255,255,255,0.085), rgba(255,255,255,0.026) 55%, rgba(255,255,255,0.012))",
+        boxShadow: "0 28px 90px rgba(0,0,0,0.28)", overflow: "hidden", position: "relative",
       }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ minWidth: 220 }}>
-            <div style={{ fontSize: isMobile ? 24 : 30, lineHeight: 1.05, fontWeight: 800, letterSpacing: -1.1, color: T.text1 }}>Welcome back</div>
-            <div style={{ marginTop: 7, fontSize: 12, color: T.text4 }}>{compactStats}</div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={onQuickAdd} style={dashPrimary}>Add</button>
-            <button onClick={onImport} style={dashSecondary}>Import Sheet</button>
-          </div>
-        </div>
-        {primary && (
-          <button onClick={() => onOpen(primary)} style={{ marginTop: 16, width: "100%", display: "flex", alignItems: "center", gap: 12, textAlign: "left", padding: 12, border: `1px solid ${T.borderSub}`, borderRadius: 16, background: "rgba(0,0,0,0.20)", color: T.text1, cursor: "pointer" }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.green, flexShrink: 0 }} />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 11, color: T.text4, marginBottom: 3 }}>Pick up where you left off</div>
-              <div style={{ fontSize: 14, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{primary.title || primary.url}</div>
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 85% 15%, rgba(255,255,255,0.10), transparent 32%)" }} />
+        <div style={{ position: "relative", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1.1fr) minmax(260px,0.75fr)", gap: 16, alignItems: "stretch" }}>
+          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 16 }}>
+            <div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 9px", borderRadius: 999, border: `1px solid ${T.borderSub}`, background: "rgba(0,0,0,0.24)", color: T.text4, fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 12 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green }} /> Private Library
+              </div>
+              <div style={{ fontSize: isMobile ? 25 : 34, lineHeight: 1.02, fontWeight: 850, letterSpacing: -1.25, color: T.text1 }}>Welcome back</div>
+              <div style={{ marginTop: 8, fontSize: 12, color: T.text4, lineHeight: 1.45 }}>
+                {allItems.length} saved · {folders.length} folders · {totalViews} views · {topRatedItems.length} rated
+              </div>
             </div>
-          </button>
-        )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={onQuickAdd} style={dashPrimary}>Add media</button>
+              <button onClick={onImport} style={dashSecondary}>Import Sheet</button>
+              {folderCards.length > 0 && <button onClick={() => onNavigate("all")} style={dashSecondary}>Browse library</button>}
+            </div>
+          </div>
+
+          {primary ? (
+            <button onClick={() => onOpen(primary)} style={{ border: `1px solid ${T.borderSub}`, borderRadius: 18, padding: 10, background: "rgba(0,0,0,0.30)", color: T.text1, textAlign: "left", cursor: "pointer", display: "grid", gridTemplateColumns: "76px minmax(0,1fr)", gap: 12, alignItems: "center", minHeight: 112 }}>
+              <div style={{ aspectRatio: "4 / 5", borderRadius: 13, overflow: "hidden", background: "rgba(255,255,255,0.05)", border: `1px solid ${T.borderSub}` }}>
+                <GalleryImage candidates={imageCandidatesForItem(primary)} alt={primary.title || ""} fit={primary.cover_fit || "cover"} position={`${primary.cover_position_x || 50}% ${primary.cover_position_y || 50}%`} fallbackIcon="play" />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 10, color: T.text4, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 6 }}>Pick up</div>
+                <div style={{ fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 6 }}>{primary.title || primary.url}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, color: T.text4, fontSize: 11 }}>
+                  <span>{primary.source || sourceIdOf(primary.url || "") || "media"}</span>
+                  {userData[primary.key]?.rating ? <span>★ {userData[primary.key]?.rating}</span> : null}
+                </div>
+              </div>
+            </button>
+          ) : (
+            <div style={{ border: `1px dashed ${T.border}`, borderRadius: 18, padding: 16, background: "rgba(0,0,0,0.22)", color: T.text4, fontSize: 12, lineHeight: 1.5 }}>
+              Save a link, Drive file, video, image, or PDF. The dashboard will organize the useful stuff once your vault has data.
+            </div>
+          )}
+        </div>
       </div>
 
-      <GalleryDashboardRow title="Recent Galleries" empty="Open a gallery and it will appear here." galleries={(recentGalleries.length ? recentGalleries : folderCards).slice(0, 6)} onOpenGallery={(name) => onNavigate(`folder:${name}`)} onCreateGallery={onCreateGallery} />
-      <DashboardRow title="Continue Watching" empty="No active videos yet." items={continueItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("continue")} />
-      {mostOiledItems.length > 0 && <DashboardRow title="Most Oiled" empty="" items={mostOiledItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />}
-      {topRatedItems.length > 0 && <DashboardRow title="Rated Media" empty="" items={topRatedItems.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={() => onNavigate("rated")} />}
-      <DashboardRow title="Recently Added" empty="Your newest saves appear here." items={recentlyAdded.slice(0, 6)} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} />
+      {!hasItems && (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3,minmax(0,1fr))", gap: 10 }}>
+          <QuickStartCard title="Add your first item" sub="Paste any link or media URL." action="Add" onClick={onQuickAdd} />
+          <QuickStartCard title="Import from Sheet" sub="Bring in a batch from your collection sheet." action="Import" onClick={onImport} />
+          <QuickStartCard title="Create a gallery" sub="Group a photo set or reference batch." action="New gallery" onClick={onCreateGallery} />
+        </div>
+      )}
+
+      {activeGalleryRows.length > 0 && (
+        <GalleryDashboardRow title={recentGalleries.length ? "Recent Galleries" : "Collections"} empty="Create a gallery and it will appear here." galleries={activeGalleryRows} onOpenGallery={(name) => onNavigate(`folder:${name}`)} onCreateGallery={onCreateGallery} />
+      )}
+
+      {visibleRows.map((row) => (
+        <DashboardRow key={row.key} title={row.title} empty={row.empty} items={row.items} onOpen={onOpen} cardProps={cardProps} cardMode={cardMode} onSeeAll={row.seeAll} />
+      ))}
     </div>
   );
 }
 
+function QuickStartCard({ title, sub, action, onClick }) {
+  return (
+    <button onClick={onClick} style={{ textAlign: "left", padding: 14, borderRadius: 16, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.035)", color: T.text1, cursor: "pointer" }}>
+      <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 5 }}>{title}</div>
+      <div style={{ fontSize: 11, color: T.text4, lineHeight: 1.45, marginBottom: 12 }}>{sub}</div>
+      <span style={{ fontSize: 11, color: T.text2, fontWeight: 800 }}>{action} →</span>
+    </button>
+  );
+}
 
 function GalleryDashboardRow({ title, empty, galleries, onOpenGallery, onCreateGallery }) {
   return (
@@ -1254,7 +1388,7 @@ const dashSecondary = { padding: "10px 15px", borderRadius: 12, background: "rgb
 
 // ── Layout pieces ────────────────────────────────────────────────────────────
 
-function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onImport, onQuickAdd }) {
+function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef, search, onSearchChange, onSort, sortBy, onImport, onQuickAdd, xrSupported, onEnterXR }) {
   return (
     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100 }}>
       <button onClick={onMenu} style={iconBtn}><Icon name="menu" size={18} /></button>
@@ -1264,13 +1398,14 @@ function MobileTopBar({ title, onMenu, onSearch, syncing, searchOpen, searchRef,
       }
       {onSort && <button onClick={onSort} style={{ ...iconBtn, background: sortBy !== "default" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.06)" }}><Icon name="sort" size={16} /></button>}
       {onImport && <button onClick={onImport} style={iconBtn} title="Import Sheet"><Icon name="import" size={16} /></button>}
+      {xrSupported && <button onClick={onEnterXR} style={{ ...iconBtn, borderRadius: 12, fontSize: 11, fontWeight: 900 }} title="VR Library">VR</button>}
       {onQuickAdd && <button onClick={onQuickAdd} style={iconBtn} title="Add video"><Icon name="addCircle" size={16} /></button>}
       <button onClick={onSearch} style={iconBtn}><Icon name="search" size={16} /></button>
     </div>
   );
 }
 
-function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall, showFilterPills, onToggleFilters }) {
+function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onViewMode, onImport, syncing, sortBy, onSortChange, onQuickAdd, installPrompt, onInstall, showFilterPills, onToggleFilters, xrSupported, onEnterXR }) {
   const [showSortDrop, setShowSortDrop] = useState(false);
   return (
     <div style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${T.borderSub}`, position: "sticky", top: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)", zIndex: 100, gap: 12, flexWrap: "wrap" }}>
@@ -1303,6 +1438,7 @@ function DesktopTopBar({ viewTitle, viewItems, search, onSearch, viewMode, onVie
         </div>
         <button onClick={onToggleFilters} style={{ ...iconBtn, borderRadius: 7, background: showFilterPills ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)" }} title="Show filters"><Icon name="filter" size={16} /></button>
         <button onClick={onImport} style={{ ...iconBtn, borderRadius: 7 }} title="Import Sheet"><Icon name="import" size={16} /></button>
+        {xrSupported && <button onClick={onEnterXR} style={{ ...iconBtn, borderRadius: 7, width: 42, fontSize: 11, fontWeight: 900 }} title="Enter VR Library">VR</button>}
         <button onClick={onQuickAdd} style={{ ...iconBtn, borderRadius: 7 }} title="Add video"><Icon name="addCircle" size={16} /></button>
         {installPrompt && <button onClick={onInstall} style={{ ...iconBtn, borderRadius: 7 }} title="Install app"><Icon name="download" size={15} /></button>}
 
@@ -1337,13 +1473,17 @@ const ErrorBox = ({ msg }) => (
 );
 
 const EmptyState = ({ icon, title, sub, action, actionLabel, secondaryAction, secondaryActionLabel }) => (
-  <div style={{ textAlign: "center", padding: "80px 20px" }}>
-    <Icon name={icon || "inbox"} size={36} style={{ color: T.text4, marginBottom: 14 }} />
-    <div style={{ fontSize: 16, fontWeight: 500, color: T.text3, marginBottom: 6 }}>{title}</div>
-    <div style={{ fontSize: 12, color: T.text4, marginBottom: 20 }}>{sub}</div>
-    <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-      {action && <button onClick={action} style={{ padding: "9px 20px", background: "#fff", color: "#000", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>{actionLabel}</button>}
-      {secondaryAction && <button onClick={secondaryAction} style={{ padding: "9px 20px", background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`, borderRadius: 8, color: T.text2, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>{secondaryActionLabel}</button>}
+  <div style={{ display: "grid", placeItems: "center", padding: "72px 16px" }}>
+    <div style={{ width: "min(420px, 100%)", textAlign: "center", padding: "28px 22px", border: `1px dashed ${T.border}`, borderRadius: 22, background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.018))" }}>
+      <div style={{ width: 54, height: 54, borderRadius: 18, display: "grid", placeItems: "center", margin: "0 auto 14px", color: T.text3, background: "rgba(255,255,255,0.05)", border: `1px solid ${T.borderSub}` }}>
+        <Icon name={icon || "inbox"} size={28} />
+      </div>
+      <div style={{ fontSize: 17, fontWeight: 800, color: T.text2, marginBottom: 7, letterSpacing: -0.2 }}>{title}</div>
+      <div style={{ fontSize: 12, color: T.text4, lineHeight: 1.5, margin: "0 auto 20px", maxWidth: 310 }}>{sub}</div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+        {action && <button onClick={action} style={{ padding: "10px 18px", background: "#fff", color: "#000", border: "none", borderRadius: 999, fontSize: 13, fontWeight: 800, cursor: "pointer" }}>{actionLabel}</button>}
+        {secondaryAction && <button onClick={secondaryAction} style={{ padding: "10px 18px", background: "rgba(255,255,255,0.08)", border: `1px solid ${T.border}`, borderRadius: 999, color: T.text2, fontSize: 13, fontWeight: 800, cursor: "pointer" }}>{secondaryActionLabel}</button>}
+      </div>
     </div>
   </div>
 );

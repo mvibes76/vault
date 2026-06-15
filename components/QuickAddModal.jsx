@@ -171,13 +171,18 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
         paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)",
         fontFamily: "Inter, sans-serif",
         maxWidth: 540, margin: "0 auto",
+        maxHeight: "92dvh", overflowY: "auto",
+        boxShadow: "0 -24px 80px rgba(0,0,0,0.65)",
       }}>
         <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 6px" }}>
           <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} />
         </div>
 
         <div style={{ padding: "4px 20px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: T.text1 }}>{mode === "edit" ? "Edit Vault Item" : "Add to Vault"}</span>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: T.text1 }}>{mode === "edit" ? "Edit item" : "Add media"}</div>
+            <div style={{ fontSize: 11, color: T.text4, marginTop: 2 }}>{mode === "edit" ? "Update the saved link, cover, folder, or notes." : "Paste once. Supabase saves the real vault record."}</div>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.text3, cursor: "pointer", padding: 4 }}>
             <Icon name="x" size={18} />
           </button>

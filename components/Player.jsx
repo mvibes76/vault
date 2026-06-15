@@ -59,7 +59,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const [markNotice, setMarkNotice] = useState("");
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [driveFallback, setDriveFallback] = useState(false);
-
+  const [oilBursts, setOilBursts] = useState([]);
   const backdropTap = useRef(0);
 
   // Extraction state (used when source.id === "extract")
@@ -414,7 +414,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     if (dx < 0 && hasPrev) onNavigate?.(currentIdx - 1);
   };
 
-  const enhanceFilter = enhanceMode === "crisp" ? "contrast(1.18) saturate(1.08) brightness(1.04)" : enhanceMode === "cinema" ? "contrast(1.14) saturate(0.96) brightness(0.98)" : enhanceMode === "soft" ? "contrast(1.05) saturate(1.03) brightness(1.01)" : "none";
+  const enhanceFilter = enhanceMode === "crisp" ? "contrast(1.24) saturate(1.1) brightness(1.04)" : enhanceMode === "cinema" ? "contrast(1.14) saturate(0.96) brightness(0.98)" : enhanceMode === "soft" ? "contrast(1.05) saturate(1.03) brightness(1.01)" : "none";
 
   const markMoment = () => {
     const seconds = videoRef.current?.currentTime || ytPlayer.current?.getCurrentTime?.() || Number(resumeAt || 0) || 0;
@@ -427,436 +427,13 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     markNoticeTimer.current = setTimeout(() => setMarkNotice(""), 1800);
   };
 
-  const splashCanvasRef = useRef(null);
-  const splashAnimRef   = useRef(null);
-  const [splashZone, setSplashZone] = useState("C");
-  const [paintMode, setPaintMode]   = useState("paint"); // "paint" | "slap"
-  const [slapHand, setSlapHand]     = useState("R");     // "L" | "R"
-
-  const ZONES = {
-    TL: [0.22, 0.25], TR: [0.78, 0.25],
-    C:  [0.50, 0.48],
-    BL: [0.22, 0.72], BR: [0.78, 0.72],
-  };
-
-  // ── Hand slap animation ────────────────────────────────────────────────────
-  const triggerSlap = useCallback((e) => {
-    e?.stopPropagation?.();
-    onOil?.();
-
-    const canvas = splashCanvasRef.current;
-    if (!canvas) return;
-    const W = canvas.width  = window.innerWidth;
-    const H = canvas.height = window.innerHeight;
-    const ctx = canvas.getContext("2d");
-    if (splashAnimRef.current) cancelAnimationFrame(splashAnimRef.current);
-
-    const [zx, zy] = ZONES[splashZone] || ZONES.C;
-    const tx = W * zx;
-    const ty = H * zy;
-    const flip = slapHand === "L" ? -1 : 1; // mirror for left hand
-
-    const SMACK_T  = 0.22;
-    const RECOIL_T = 0.50;
-    const DUR      = 950;
-    const born     = performance.now();
-    const markRot  = (Math.random() - 0.5) * 0.3;
-    const markScl  = 0.9 + Math.random() * 0.2;
-
-    // ── Draw hand as ONE continuous blob path (no per-finger loop jitter) ──
-    // Viewed face-on: palm at bottom, 4 fingers up, thumb to the side
-    // All coords relative to center, then translated/flipped
-    function handPath(ctx, s) {
-      // s = scale factor (shrinks on recoil)
-      const p = (x, y) => [x * s * flip, y * s]; // apply scale + mirror
-      ctx.beginPath();
-      // Start bottom-left of palm, go clockwise
-      // Palm bottom
-      ctx.moveTo(...p(-38,  30));
-      ctx.bezierCurveTo(...p(-45, 42), ...p( 45, 42), ...p( 38,  30));
-      // Palm right side up to pinky base
-      ctx.bezierCurveTo(...p( 48, 18), ...p( 48,  0), ...p( 44, -10));
-      // Pinky finger
-      ctx.bezierCurveTo(...p( 50,-12), ...p( 54,-55), ...p( 44, -70));
-      ctx.bezierCurveTo(...p( 36,-80), ...p( 28,-78), ...p( 30, -65));
-      ctx.bezierCurveTo(...p( 30,-55), ...p( 34,-16), ...p( 28, -14));
-      // Ring finger
-      ctx.bezierCurveTo(...p( 24,-16), ...p( 22,-85), ...p( 12, -96));
-      ctx.bezierCurveTo(...p(  2,-104), ...p( -8,-100), ...p( -6, -88));
-      ctx.bezierCurveTo(...p( -4,-78), ...p(  4,-16), ...p( -2, -15));
-      // Middle finger
-      ctx.bezierCurveTo(...p( -6,-17), ...p(-14,-92), ...p(-24,-100));
-      ctx.bezierCurveTo(...p(-34,-108), ...p(-44,-102), ...p(-42, -90));
-      ctx.bezierCurveTo(...p(-40,-78), ...p(-30,-16), ...p(-36, -14));
-      // Index finger
-      ctx.bezierCurveTo(...p(-40,-14), ...p(-52,-74), ...p(-58, -80));
-      ctx.bezierCurveTo(...p(-66,-86), ...p(-72,-76), ...p(-68, -66));
-      ctx.bezierCurveTo(...p(-64,-56), ...p(-50, -8), ...p(-50,   2));
-      // Left palm side down to thumb
-      ctx.bezierCurveTo(...p(-52,  8), ...p(-56, 18), ...p(-52,  28));
-      // Thumb (sticking out to the left)
-      ctx.bezierCurveTo(...p(-52, 34), ...p(-80, 30), ...p(-88,  16));
-      ctx.bezierCurveTo(...p(-96,  2), ...p(-86,-12), ...p(-74, -10));
-      ctx.bezierCurveTo(...p(-62, -8), ...p(-48, 20), ...p(-42,  28));
-      ctx.closePath();
-    }
-
-    // ── Handprint: same silhouette but flattened + squashed ─────────────────
-    function printPath(ctx, s) {
-      const p = (x, y) => [x * s * flip * markScl, y * s * markScl * 0.55]; // squash vertically = flat on glass
-      ctx.save();
-      ctx.rotate(markRot);
-      ctx.beginPath();
-      ctx.moveTo(...p(-38,  30));
-      ctx.bezierCurveTo(...p(-45, 42), ...p( 45, 42), ...p( 38,  30));
-      ctx.bezierCurveTo(...p( 48, 18), ...p( 48,  0), ...p( 44, -10));
-      ctx.bezierCurveTo(...p( 50,-12), ...p( 54,-55), ...p( 44, -70));
-      ctx.bezierCurveTo(...p( 36,-80), ...p( 28,-78), ...p( 30, -65));
-      ctx.bezierCurveTo(...p( 30,-55), ...p( 34,-16), ...p( 28, -14));
-      ctx.bezierCurveTo(...p( 24,-16), ...p( 22,-85), ...p( 12, -96));
-      ctx.bezierCurveTo(...p(  2,-104), ...p( -8,-100), ...p( -6, -88));
-      ctx.bezierCurveTo(...p( -4,-78), ...p(  4,-16), ...p( -2, -15));
-      ctx.bezierCurveTo(...p( -6,-17), ...p(-14,-92), ...p(-24,-100));
-      ctx.bezierCurveTo(...p(-34,-108), ...p(-44,-102), ...p(-42, -90));
-      ctx.bezierCurveTo(...p(-40,-78), ...p(-30,-16), ...p(-36, -14));
-      ctx.bezierCurveTo(...p(-40,-14), ...p(-52,-74), ...p(-58, -80));
-      ctx.bezierCurveTo(...p(-66,-86), ...p(-72,-76), ...p(-68, -66));
-      ctx.bezierCurveTo(...p(-64,-56), ...p(-50, -8), ...p(-50,   2));
-      ctx.bezierCurveTo(...p(-52,  8), ...p(-56, 18), ...p(-52,  28));
-      ctx.bezierCurveTo(...p(-52, 34), ...p(-80, 30), ...p(-88,  16));
-      ctx.bezierCurveTo(...p(-96,  2), ...p(-86,-12), ...p(-74, -10));
-      ctx.bezierCurveTo(...p(-62, -8), ...p(-48, 20), ...p(-42,  28));
-      ctx.closePath();
-      ctx.restore();
-    }
-
-    function draw(now) {
-      const t = Math.min(1, (now - born) / DUR);
-      ctx.clearRect(0, 0, W, H);
-
-      // ── Fly-in and recoil ────────────────────────────────────────────────
-      if (t < RECOIL_T) {
-        const flyT   = Math.min(1, t / SMACK_T);
-        const eased  = 1 - Math.pow(1 - flyT, 3);
-        const offX   = (isLeft ? -1 : 1) * W * 0.6; // comes from left or right
-        const offY   = -H * 0.28;
-        const hx     = tx + offX * (1 - eased);
-        const hy     = ty + offY * (1 - eased);
-        const recoilT = t < SMACK_T ? 0 : (t - SMACK_T) / (RECOIL_T - SMACK_T);
-        const recoilY = recoilT * H * -0.35;
-        const squeeze = t < SMACK_T
-          ? 1 + eased * 0.08          // slight squish on approach
-          : 1 - recoilT * 0.15;       // bounce back
-        const handA = Math.min(1, flyT * 3);
-
-        ctx.save();
-        ctx.translate(hx, hy + recoilY);
-        // Skin gradient for 3D feel
-        const hGrd = ctx.createRadialGradient(-20 * flip, -30, 8, 0, 0, 120);
-        hGrd.addColorStop(0,    `rgba(255,220,175,${handA})`);
-        hGrd.addColorStop(0.5,  `rgba(235,185,130,${handA})`);
-        hGrd.addColorStop(1,    `rgba(195,140,90,${handA * 0.8})`);
-        handPath(ctx, squeeze);
-        ctx.fillStyle = hGrd;
-        ctx.shadowColor = `rgba(0,0,0,${handA * 0.4})`;
-        ctx.shadowBlur  = 18;
-        ctx.fill();
-        ctx.shadowBlur  = 0;
-        // Edge outline
-        handPath(ctx, squeeze);
-        ctx.strokeStyle = `rgba(170,110,65,${handA * 0.5})`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // ── Impact flash ─────────────────────────────────────────────────────
-      if (t >= SMACK_T && t < SMACK_T + 0.1) {
-        const ft = (t - SMACK_T) / 0.1;
-        const fa = (1 - ft) * 0.75;
-        const fr = 50 + ft * 100;
-        const fg = ctx.createRadialGradient(tx, ty, 0, tx, ty, fr);
-        fg.addColorStop(0,   `rgba(255,240,200,${fa})`);
-        fg.addColorStop(0.4, `rgba(255,120,60,${fa * 0.55})`);
-        fg.addColorStop(1,   `rgba(220,40,20,0)`);
-        ctx.beginPath();
-        ctx.arc(tx, ty, fr, 0, Math.PI * 2);
-        ctx.fillStyle = fg;
-        ctx.fill();
-      }
-
-      // ── Handprint welt — appears on smack, stays and fades ───────────────
-      if (t >= SMACK_T) {
-        const age  = (t - SMACK_T) / (1 - SMACK_T);
-        const pa   = Math.max(0, 0.92 - age * 0.58);
-        // Outer welt glow (skin reaction)
-        ctx.save();
-        ctx.translate(tx, ty);
-        printPath(ctx, 1);
-        const welt = ctx.createRadialGradient(0, -20 * markScl, 0, 0, 0, 110 * markScl);
-        welt.addColorStop(0,   `rgba(210,45,45,${pa})`);
-        welt.addColorStop(0.55,`rgba(185,25,25,${pa * 0.85})`);
-        welt.addColorStop(0.85,`rgba(155,15,15,${pa * 0.5})`);
-        welt.addColorStop(1,   `rgba(120,10,10,0)`);
-        ctx.fillStyle = welt;
-        ctx.shadowColor = `rgba(200,30,30,${pa * 0.6})`;
-        ctx.shadowBlur  = 22;
-        ctx.fill();
-        ctx.shadowBlur  = 0;
-        // Inner darker print
-        ctx.save();
-        ctx.globalAlpha = pa * 0.45;
-        printPath(ctx, 0.82);
-        ctx.fillStyle = "rgba(130,10,10,1)";
-        ctx.fill();
-        ctx.restore();
-        ctx.restore();
-      }
-
-      if (t < 1) {
-        splashAnimRef.current = requestAnimationFrame(draw);
-      } else {
-        ctx.clearRect(0, 0, W, H);
-      }
-    }
-
-    splashAnimRef.current = requestAnimationFrame(draw);
-  }, [onOil, splashZone, slapHand]);
-
   const triggerOil = useCallback((e) => {
     e?.stopPropagation?.();
+    const id = Date.now() + Math.random();
+    setOilBursts((prev) => [...prev.slice(-3), { id }]);
     onOil?.();
-
-    const canvas = splashCanvasRef.current;
-    if (!canvas) return;
-    const W = canvas.width  = window.innerWidth;
-    const H = canvas.height = window.innerHeight;
-    const ctx = canvas.getContext("2d");
-    if (splashAnimRef.current) cancelAnimationFrame(splashAnimRef.current);
-
-    // Impact point driven by selected zone + small random jitter
-    const [zx, zy] = ZONES[splashZone] || ZONES.C;
-    const cx = W * zx + (Math.random() - 0.5) * W * 0.06;
-    const cy = H * zy + (Math.random() - 0.5) * H * 0.05;
-
-    // ── Blob lobes — radial gradients composited "lighter" = merged organic mass
-    const lobes = Array.from({ length: 7 + Math.floor(Math.random() * 5) }, (_, i) => {
-      const a = (i / 7) * Math.PI * 2 + (Math.random() - 0.5) * 1.2;
-      const d = i === 0 ? 0 : 12 + Math.random() * 32;
-      return {
-        x: cx + Math.cos(a) * d,
-        y: cy + Math.sin(a) * d,
-        vx: i === 0 ? 0 : Math.cos(a) * (0.6 + Math.random() * 1.4),
-        vy: i === 0 ? 0 : Math.sin(a) * (0.6 + Math.random() * 1.4),
-        r: i === 0 ? 38 + Math.random() * 18 : 12 + Math.random() * 22,
-        life: 1,
-        decay: i === 0 ? 0.012 : 0.016 + Math.random() * 0.01,
-        grav: 0.06 + Math.random() * 0.08,
-      };
-    });
-
-    // ── Tendrils: thick filled shapes, not stroked lines ─────────────────────
-    // Each tendril is drawn as a filled path: two bezier edges + rounded tip
-    const arms = Array.from({ length: 6 + Math.floor(Math.random() * 4) }, () => {
-      const a      = Math.random() * Math.PI * 2;
-      const len    = 70 + Math.random() * 120;
-      const perpA  = a + Math.PI * 0.5 * (Math.random() > 0.5 ? 1 : -1);
-      const cpDist = 25 + Math.random() * 55;
-      return {
-        angle: a,
-        len,
-        // Root width (fat) and tip radius
-        rootW: 18 + Math.random() * 28,
-        tipR:  8  + Math.random() * 14,
-        // Bezier control point for the spine of the tendril
-        cpx: cx + Math.cos(a) * len * 0.45 + Math.cos(perpA) * cpDist,
-        cpy: cy + Math.sin(a) * len * 0.45 + Math.sin(perpA) * cpDist,
-        // End point
-        ex: cx + Math.cos(a) * len,
-        ey: cy + Math.sin(a) * len + 10 + Math.random() * 20,
-        prog: 0,
-        speed: 0.055 + Math.random() * 0.05,
-        life: 1,
-        decay: 0.015 + Math.random() * 0.01,
-      };
-    });
-
-    // ── Droplets ─────────────────────────────────────────────────────────────
-    const drops = Array.from({ length: 40 + Math.floor(Math.random() * 30) }, () => {
-      const a = Math.random() * Math.PI * 2;
-      const spd = 2 + Math.random() * 18;
-      return {
-        x: cx + (Math.random() - 0.5) * 30,
-        y: cy + (Math.random() - 0.5) * 30,
-        vx: Math.cos(a) * spd,
-        vy: Math.sin(a) * spd - Math.random() * 5,
-        r: 1.5 + Math.random() * 6,
-        life: 1,
-        decay: 0.016 + Math.random() * 0.016,
-        grav: 0.2 + Math.random() * 0.2,
-      };
-    });
-
-    // ── Drips: thin vertical threads growing downward ─────────────────────────
-    const drips = Array.from({ length: 4 + Math.floor(Math.random() * 3) }, () => ({
-      x: cx + (Math.random() - 0.5) * 80,
-      y: cy + 20 + Math.random() * 30,
-      w: 1.5 + Math.random() * 4,
-      len: 0,
-      maxLen: 50 + Math.random() * 100,
-      spd: 1.2 + Math.random() * 2,
-      life: 1,
-      decay: 0.009,
-    }));
-
-    const born = performance.now();
-
-    function draw(now) {
-      const age = (now - born) / 1000;
-      ctx.clearRect(0, 0, W, H);
-
-      // ── Central blob mass — lighter composite for merged blobby look ─────
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      lobes.forEach((l) => {
-        if (l.life <= 0) return;
-        l.vy += l.grav;
-        l.x  += l.vx; l.y += l.vy;
-        l.vx *= 0.96; l.vy *= 0.96;
-        l.life -= l.decay;
-        const a = Math.max(0, l.life);
-        const r = l.r * (0.5 + a * 0.5);
-        // Offset highlight for 3D sheen — light source top-left
-        const grd = ctx.createRadialGradient(
-          l.x - r * 0.3, l.y - r * 0.3, r * 0.02,
-          l.x, l.y, r
-        );
-        grd.addColorStop(0,    `rgba(255,255,255,${a * 0.95})`);  // bright highlight
-        grd.addColorStop(0.18, `rgba(252,254,255,${a * 0.88})`);  // sheen ring
-        grd.addColorStop(0.45, `rgba(235,245,255,${a * 0.62})`);  // mid body
-        grd.addColorStop(0.75, `rgba(210,230,255,${a * 0.25})`);  // edge shadow
-        grd.addColorStop(1,    `rgba(180,210,255,0)`);
-        ctx.beginPath();
-        ctx.arc(l.x, l.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = grd;
-        ctx.fill();
-      });
-      ctx.restore();
-
-      // ── Tendrils — drawn as filled shapes, fat at root, rounded tip ────────
-      arms.forEach((arm) => {
-        if (arm.life <= 0) return;
-        arm.prog  = Math.min(1, arm.prog + arm.speed);
-        arm.life -= arm.decay;
-        const p  = arm.prog;
-        const al = arm.life;
-        if (p <= 0.01) return;
-
-        // Tip position along bezier at progress p
-        const tipX = (1-p)*(1-p)*cx + 2*(1-p)*p*arm.cpx + p*p*arm.ex;
-        const tipY = (1-p)*(1-p)*cy + 2*(1-p)*p*arm.cpy + p*p*arm.ey;
-
-        // Spine tangent at tip — perpendicular gives us the width offset
-        const dt  = 0.02;
-        const p2  = Math.min(1, p + dt);
-        const tx2 = (1-p2)*(1-p2)*cx + 2*(1-p2)*p2*arm.cpx + p2*p2*arm.ex;
-        const ty2 = (1-p2)*(1-p2)*cy + 2*(1-p2)*p2*arm.cpy + p2*p2*arm.ey;
-        const tang = Math.atan2(ty2 - tipY, tx2 - tipX);
-        const perp = tang + Math.PI * 0.5;
-
-        // Root width tapers to near-zero at tip
-        const rootW = arm.rootW * al;
-        const midW  = rootW * 0.55; // slight waist in the middle
-
-        // Draw filled tendril: left bezier edge → rounded tip arc → right edge back → root arc
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(perp) * rootW, cy + Math.sin(perp) * rootW);
-        // Left bezier edge to tip
-        ctx.quadraticCurveTo(
-          arm.cpx + Math.cos(perp) * midW,
-          arm.cpy + Math.sin(perp) * midW,
-          tipX + Math.cos(perp) * arm.tipR * al * p,
-          tipY + Math.sin(perp) * arm.tipR * al * p
-        );
-        // Rounded tip arc
-        ctx.arc(tipX, tipY, arm.tipR * al * p, perp, perp + Math.PI, false);
-        // Right bezier edge back to root
-        ctx.quadraticCurveTo(
-          arm.cpx - Math.cos(perp) * midW,
-          arm.cpy - Math.sin(perp) * midW,
-          cx - Math.cos(perp) * rootW,
-          cy - Math.sin(perp) * rootW
-        );
-        // Root arc to close
-        ctx.arc(cx, cy, rootW, perp + Math.PI, perp, false);
-        ctx.closePath();
-
-        // Fill with gradient: bright at root, semi-transparent at tip
-        const tGrd = ctx.createLinearGradient(cx, cy, tipX, tipY);
-        tGrd.addColorStop(0,    `rgba(255,255,255,${al * 0.92})`);
-        tGrd.addColorStop(0.4,  `rgba(248,252,255,${al * 0.80})`);
-        tGrd.addColorStop(0.75, `rgba(235,245,255,${al * 0.60})`);
-        tGrd.addColorStop(1,    `rgba(220,238,255,${al * 0.20})`);
-        ctx.fillStyle = tGrd;
-        ctx.shadowColor = "rgba(255,255,255,0.3)";
-        ctx.shadowBlur  = 6;
-        ctx.fill();
-        ctx.shadowBlur  = 0;
-      });
-
-      // ── Droplets ─────────────────────────────────────────────────────────
-      drops.forEach((d) => {
-        if (d.life <= 0) return;
-        d.vy += d.grav; d.x += d.vx * 0.97; d.y += d.vy; d.vx *= 0.98;
-        d.life -= d.decay;
-        // Small sheen on each droplet
-        const dr = Math.max(0.4, d.r * d.life);
-        const dg = ctx.createRadialGradient(d.x - dr*0.3, d.y - dr*0.3, 0.2, d.x, d.y, dr);
-        dg.addColorStop(0, `rgba(255,255,255,${d.life * 0.95})`);
-        dg.addColorStop(1, `rgba(220,235,255,0)`);
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, dr, 0, Math.PI * 2);
-        ctx.fillStyle = dg;
-        ctx.fill();
-      });
-
-      // ── Drips ────────────────────────────────────────────────────────────
-      drips.forEach((dr) => {
-        if (dr.life <= 0) return;
-        dr.len   = Math.min(dr.maxLen, dr.len + dr.spd * (1 + age * 0.3));
-        dr.life -= dr.decay;
-        const dg = ctx.createLinearGradient(dr.x, dr.y, dr.x, dr.y + dr.len);
-        dg.addColorStop(0,    `rgba(255,255,255,${dr.life * 0.9})`);
-        dg.addColorStop(0.65, `rgba(255,255,255,${dr.life * 0.45})`);
-        dg.addColorStop(1,    `rgba(255,255,255,0)`);
-        ctx.beginPath();
-        ctx.moveTo(dr.x, dr.y);
-        ctx.lineTo(dr.x, dr.y + dr.len);
-        ctx.strokeStyle = dg;
-        ctx.lineWidth   = dr.w * dr.life;
-        ctx.lineCap     = "round";
-        ctx.stroke();
-        // Bead at tip
-        ctx.beginPath();
-        ctx.arc(dr.x, dr.y + dr.len, dr.w * 0.9 * dr.life, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,255,255,${dr.life * 0.7})`;
-        ctx.fill();
-      });
-
-      const anyAlive = lobes.some((l) => l.life > 0)
-        || arms.some((a) => a.life > 0)
-        || drops.some((d) => d.life > 0)
-        || drips.some((dr) => dr.life > 0);
-
-      if (anyAlive) {
-        splashAnimRef.current = requestAnimationFrame(draw);
-      } else {
-        ctx.clearRect(0, 0, W, H);
-      }
-    }
-
-    splashAnimRef.current = requestAnimationFrame(draw);
-  }, [onOil, splashZone]);
+    setTimeout(() => setOilBursts((prev) => prev.filter((b) => b.id !== id)), 1050);
+  }, [onOil]);
 
   const openPopout = useCallback(() => {
     const target = (embed?.kind === "video" || embed?.kind === "hls") ? (mediaSrc || embed.src) :
@@ -871,7 +448,8 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       return (
         <div style={{ textAlign: "center", padding: "32px 24px", maxWidth: 320 }}>
           <Icon name="alert" size={28} style={{ color: T.text3, marginBottom: 12 }} />
-          <div style={{ fontSize: 14, color: T.text2, marginBottom: 6 }}>This URL can't be played inside the vault.</div>
+          <div style={{ fontSize: 14, color: T.text2, marginBottom: 6 }}>This source does not expose an embeddable player.</div>
+          <div style={{ fontSize: 11, color: T.text4, lineHeight: 1.45, marginBottom: 14 }}>The vault saved the reference, but this site has to open outside the internal player.</div>
           <div style={{ fontSize: 11, color: T.text4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.url}</div>
         </div>
       );
@@ -890,6 +468,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <div style={{ textAlign: "center", padding: "32px 24px", maxWidth: 360 }}>
           <Icon name="alert" size={28} style={{ color: T.text3, marginBottom: 12 }} />
           <div style={{ fontSize: 14, color: T.text2, marginBottom: 8 }}>{extractErr || "Couldn't find a playable video."}</div>
+          <div style={{ fontSize: 11, color: T.text4, margin: "0 auto 18px", lineHeight: 1.45, maxWidth: 310 }}>Some sites hide media behind login, DRM, split streams, or anti-bot systems. The vault kept the link, but playback needs an outside window.</div>
           <div style={{ fontSize: 11, color: T.text4, marginBottom: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.url}</div>
           <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
             <button onClick={(e) => { e.stopPropagation(); openPopout(); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(255,255,255,0.10)", border: `1px solid ${T.border}`, borderRadius: 20, color: T.text1, fontSize: 12, cursor: "pointer" }}>
@@ -1098,7 +677,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <button onClick={handleClose} style={ctrlBtn} title="Close"><Icon name="x" size={15} /></button>
       </div>
       {markNotice && <div style={markToast}>{markNotice}</div>}
-
+      <style jsx global>{`@keyframes vaultWebSquirt { 0% { opacity: 0; transform: translateX(64px) scaleX(0.08) scaleY(0.72) rotate(-8deg); filter: blur(5px); } 16% { opacity: 0.98; filter: blur(0.3px); } 62% { opacity: 0.86; transform: translateX(-18vw) scaleX(1.08) scaleY(1) rotate(-4deg); filter: blur(0.6px); } 100% { opacity: 0; transform: translateX(-24vw) scaleX(1.18) scaleY(1.08) rotate(-2deg); filter: blur(3px); } } @keyframes vaultWebDrip { 0% { transform: translateY(-7px); opacity: 0; } 28% { opacity: 0.92; } 100% { transform: translateY(28px); opacity: 0; } }`}</style>
 
       {/* Title chip (bottom) */}
       {item.title && (
@@ -1119,81 +698,16 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         </button>
       )}
 
-      {/* Paint / Slap panel */}
-      <div style={{ position: "absolute", right: 16, bottom: 18, zIndex: 9, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-
-        {/* Mode toggle: Paint | Slap */}
-        <div style={{ display: "flex", gap: 3, background: "rgba(0,0,0,0.45)", borderRadius: 8, padding: 3 }}>
-          {["paint", "slap"].map((m) => (
-            <button key={m} onClick={(e) => { e.stopPropagation(); setPaintMode(m); }} style={{
-              border: "none", cursor: "pointer", borderRadius: 6, padding: "3px 8px",
-              fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
-              background: paintMode === m ? "rgba(255,255,255,0.9)" : "transparent",
-              color: paintMode === m ? "#000" : "rgba(255,255,255,0.6)",
-              transition: "all 0.15s",
-            }}>
-              {m === "paint" ? "💧" : "👋"} {m.toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        {/* Zone grid — shared by both modes */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,18px)", gap: 3 }}>
-          {[
-            ["TL",""],["",""],["TR",""],
-            ["",""],["C",""],["",""],
-            ["BL",""],["",""],["BR",""],
-          ].map(([zone], idx) => zone ? (
-            <button key={zone} onClick={(e) => { e.stopPropagation(); setSplashZone(zone); }} style={{
-              width: 18, height: 18, borderRadius: 4, border: "none", cursor: "pointer",
-              background: splashZone === zone ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.18)",
-              transition: "background 0.15s",
-            }} title={zone} />
-          ) : (
-            <div key={idx} style={{ width: 18, height: 18 }} />
-          ))}
-        </div>
-
-        {/* Hand selector — only shown in slap mode */}
-        {paintMode === "slap" && (
-          <div style={{ display: "flex", gap: 4 }}>
-            {["L", "R"].map((h) => (
-              <button key={h} onClick={(e) => { e.stopPropagation(); setSlapHand(h); }} style={{
-                width: 32, height: 26, border: "none", cursor: "pointer", borderRadius: 6,
-                fontSize: 11, fontWeight: 800,
-                background: slapHand === h ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.18)",
-                color: slapHand === h ? "#000" : "rgba(255,255,255,0.7)",
-                transform: h === "L" ? "scaleX(-1)" : "none",
-                transition: "all 0.15s",
-              }}>
-                {h === "L" ? "🤚" : "🤚"}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Action button */}
-        <button
-          onClick={paintMode === "slap" ? triggerSlap : triggerOil}
-          style={oilBtn}
-          title={paintMode === "slap" ? "Slap" : "Shoot"}
-          aria-label={paintMode === "slap" ? "Slap" : "Shoot paint"}
-        >
-          {paintMode === "slap"
-            ? <span style={{ fontSize: 22, lineHeight: 1 }}>👋</span>
-            : <span style={oilDropIcon} />
-          }
-          {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
-        </button>
-      </div>
-      <canvas
-        ref={splashCanvasRef}
-        style={{
-          position: "fixed", inset: 0, zIndex: 998,
-          pointerEvents: "none",
-          width: "100vw", height: "100vh",
-        }}
-      />
+      <button
+        onClick={triggerOil}
+        style={oilBtn}
+        title="Web squirt"
+        aria-label="Web squirt"
+      >
+        <span style={oilDropIcon} />
+        {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
+      </button>
+      {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, bottom: `${118 + idx * 8}px` }}><span style={oilDripOne} /><span style={oilDripTwo} /><span style={oilDripThree} /></div>)}
 
       <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
       {showComments && (
@@ -1653,7 +1167,7 @@ const zoomBtn = {
 };
 
 const oilBtn = {
-  position: "relative", zIndex: 9,
+  position: "absolute", right: 22, bottom: 24, zIndex: 9,
   width: 46, height: 46, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.34)",
   background: "radial-gradient(circle at 35% 27%, #fff 0 18%, rgba(255,255,255,0.86) 42%, rgba(255,255,255,0.42) 100%)",
   color: "#080808", boxShadow: "0 16px 38px rgba(0,0,0,0.44), inset 0 1px 9px rgba(255,255,255,0.7)", cursor: "pointer", display: "grid", placeItems: "center",
@@ -1669,4 +1183,14 @@ const oilCountBadge = {
   position: "absolute", right: -5, top: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999,
   background: "#fff", color: "#000", border: "1px solid rgba(0,0,0,0.18)", fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center",
 };
-
+const oilSplash = {
+  position: "absolute", right: 54, zIndex: 8,
+  width: "min(46vw, 420px)", height: 128, borderRadius: "60% 36% 58% 42% / 42% 64% 36% 58%",
+  pointerEvents: "none",
+  background: "radial-gradient(ellipse at 7% 50%, rgba(255,255,255,0.98) 0 4%, transparent 5%), radial-gradient(ellipse at 22% 52%, rgba(255,255,255,0.96) 0 8%, transparent 9%), radial-gradient(ellipse at 42% 47%, rgba(255,255,255,0.92) 0 5%, transparent 6%), radial-gradient(ellipse at 68% 49%, rgba(255,255,255,0.94) 0 7%, transparent 8%), linear-gradient(92deg, transparent 0 7%, rgba(255,255,255,0.96) 10% 18%, transparent 20% 26%, rgba(255,255,255,0.88) 29% 54%, transparent 58% 63%, rgba(255,255,255,0.92) 67% 100%)",
+  mixBlendMode: "screen", opacity: 0, transformOrigin: "right center", animation: "vaultWebSquirt 0.78s cubic-bezier(.16,.84,.2,1) forwards",
+  filter: "drop-shadow(0 0 10px rgba(255,255,255,0.45))",
+};
+const oilDripOne = { position: "absolute", left: "24%", top: "58%", width: 6, height: 18, borderRadius: 999, background: "rgba(255,255,255,0.92)", animation: "vaultWebDrip 0.82s 0.12s ease-out forwards" };
+const oilDripTwo = { position: "absolute", left: "52%", top: "50%", width: 4, height: 15, borderRadius: 999, background: "rgba(255,255,255,0.82)", animation: "vaultWebDrip 0.78s 0.18s ease-out forwards" };
+const oilDripThree = { position: "absolute", left: "76%", top: "56%", width: 5, height: 22, borderRadius: 999, background: "rgba(255,255,255,0.88)", animation: "vaultWebDrip 0.9s 0.08s ease-out forwards" };

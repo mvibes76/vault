@@ -1,8 +1,9 @@
+import "./globals.css";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 export const metadata = {
   title: "Vault",
-  description: "Your personal media vault",
+  description: "A private media vault for links, files, galleries, covers, ratings, and references.",
 };
 
 export const viewport = {

@@ -116,3 +116,37 @@ Gallery and slideshow image rendering now uses a safer fallback chain so image U
 
 ## v30
 - Fixed folder slideshow/gallery display toggle so it works in all folders, not only one gallery-type folder.
+
+
+## v31 — WebXR Lite Mode
+
+- Adds optional VR Library mode for WebXR-capable devices.
+- The VR button only appears when `immersive-vr` is supported.
+- Normal desktop and mobile behavior stays unchanged.
+- No Supabase schema update is required for v31.
+
+## v32 Hardening
+
+- Added app-level crash recovery.
+- Added Settings → Diagnostics.
+- Added Settings → Backup with JSON and CSV export.
+- Added `/api/health` for Vercel/Supabase/webhook health checks.
+- Hardened folder/gallery routing and search.
+- No Supabase schema update required for v32.
+
+## v33 polish notes
+
+v33 tightens the app without changing the data model:
+
+- refined dashboard hero and rows
+- stronger empty states
+- modal overflow cleanup
+- global focus/scroll/tap styling
+- clearer player fallback messages
+- slightly stronger Crisp enhance mode
+
+No Supabase migration is required for v33.
+
+### v34 VR Upgrade
+
+WebXR Lite now opens an Ambient Vault mode with shelf navigation, a media wall, a selected-item screen, wall/cinema mode, controller-friendly controls, and desktop keyboard fallback for testing. Opening a selected item exits VR and uses the normal Vault player. No Supabase schema change is required.

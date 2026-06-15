@@ -57,6 +57,9 @@ export default function ConfigModal({
   coverLibrary = [],
   onSaveCover,
   onDeleteCover,
+  diagnostics = {},
+  onExportJSON,
+  onExportCSV,
 }) {
   const [activeTab, setActiveTab] = useState(needsManualTabs ? "sheet" : "covers");
   const [val, setVal] = useState(savedId || "");
@@ -66,6 +69,8 @@ export default function ConfigModal({
   const [coverForm, setCoverForm] = useState(emptyCover);
   const ref = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [health, setHealth] = useState(null);
+  const [healthError, setHealthError] = useState("");
 
   useEffect(() => {
     const sync = () => setIsMobile(window.innerWidth < 640);
@@ -73,6 +78,16 @@ export default function ConfigModal({
     window.addEventListener("resize", sync);
     return () => window.removeEventListener("resize", sync);
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "diagnostics") return;
+    let alive = true;
+    fetch("/api/health", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((json) => { if (alive) { setHealth(json); setHealthError(""); } })
+      .catch((e) => { if (alive) setHealthError(e.message || "Health check failed"); });
+    return () => { alive = false; };
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === "sheet") ref.current?.focus();
@@ -158,6 +173,8 @@ export default function ConfigModal({
         <div style={{ display: "flex", gap: 7, marginBottom: 16, borderBottom: `1px solid ${T.borderSub}`, paddingBottom: 8, overflowX: "auto" }}>
           <TabButton active={activeTab === "sheet"} onClick={() => setActiveTab("sheet")}>Google Sheet</TabButton>
           <TabButton active={activeTab === "covers"} onClick={() => setActiveTab("covers")}>Covers</TabButton>
+          <TabButton active={activeTab === "diagnostics"} onClick={() => setActiveTab("diagnostics")}>Diagnostics</TabButton>
+          <TabButton active={activeTab === "backup"} onClick={() => setActiveTab("backup")}>Backup</TabButton>
           <TabButton active={activeTab === "legacy"} onClick={() => setActiveTab("legacy")}>Legacy Rules</TabButton>
         </div>
 
@@ -286,6 +303,22 @@ export default function ConfigModal({
           </div>
         )}
 
+        {activeTab === "diagnostics" && (
+          <DiagnosticsTab diagnostics={diagnostics} health={health} healthError={healthError} />
+        )}
+
+        {activeTab === "backup" && (
+          <div style={panelStyle}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: T.text1, marginBottom: 5 }}>Backup / export</div>
+            <div style={{ fontSize: 12, color: T.text4, lineHeight: 1.5, marginBottom: 14 }}>Export your vault before risky changes. JSON is best for recovery. CSV is best for spreadsheet review.</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={onExportJSON} style={btnPrimary}>Export JSON backup</button>
+              <button onClick={onExportCSV} style={btnSecondary}>Export CSV</button>
+            </div>
+            <div style={{ marginTop: 14, fontSize: 11, color: T.text4, lineHeight: 1.5 }}>Exports stay local in your browser. They do not change Supabase or Google Sheets.</div>
+          </div>
+        )}
+
         {activeTab === "legacy" && (
           <div style={panelStyle}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text1, marginBottom: 6 }}>Legacy cover rules</div>
@@ -304,6 +337,54 @@ export default function ConfigModal({
         )}
       </div>
     </>
+  );
+}
+
+function DiagnosticsTab({ diagnostics, health, healthError }) {
+  const checks = [
+    ["Supabase client", diagnostics.supabaseConfigured ? "Configured" : "Local-only / missing env", diagnostics.supabaseConfigured],
+    ["Sheet webhook", health ? (health.sheetWebhookConfigured ? "Configured" : "Missing") : "Checking...", health ? health.sheetWebhookConfigured : null],
+    ["Relay size cap", health ? `${Math.round((health.mediaRelayMaxBytes || 0) / 1024 / 1024)} MB` : "Checking...", true],
+    ["Items", String(diagnostics.itemCount || 0), true],
+    ["Folders", String(diagnostics.folderCount || 0), true],
+    ["Covers", String(diagnostics.coverCount || 0), true],
+    ["Comments table", "Run latest schema if comments fail", true],
+  ];
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={panelStyle}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: T.text1, marginBottom: 5 }}>Diagnostics</div>
+        <div style={{ fontSize: 12, color: T.text4, lineHeight: 1.5, marginBottom: 12 }}>Quick health check for the vault. This does not repair anything automatically, but it tells you where to look first.</div>
+        <div style={{ display: "grid", gap: 7 }}>
+          {checks.map(([label, value, ok]) => (
+            <div key={label} style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 10, alignItems: "center", padding: "9px 10px", border: `1px solid ${T.borderSub}`, borderRadius: 10, background: "rgba(255,255,255,0.035)" }}>
+              <div style={{ fontSize: 11, color: T.text4, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 800 }}>{label}</div>
+              <div style={{ fontSize: 12, color: ok === false ? "#ff9b9b" : T.text2 }}>{value}</div>
+            </div>
+          ))}
+        </div>
+        {healthError && <div style={{ ...warnBox, color: "#ff9b9b", borderColor: "rgba(255,80,80,0.18)", background: "rgba(255,80,80,0.08)" }}>{healthError}</div>}
+      </div>
+      <div style={panelStyle}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: T.text1, marginBottom: 5 }}>Last runtime error</div>
+        <RuntimeErrorReadout />
+      </div>
+    </div>
+  );
+}
+
+function RuntimeErrorReadout() {
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    try { setErr(JSON.parse(localStorage.getItem("vv_last_runtime_error") || "null")); } catch { setErr(null); }
+  }, []);
+  if (!err) return <div style={{ fontSize: 12, color: T.text4 }}>No caught runtime error stored.</div>;
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: T.text4, marginBottom: 8 }}>{err.at}</div>
+      <pre style={{ maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap", fontSize: 11, color: "#ffb4b4", background: "rgba(255,80,80,0.06)", border: "1px solid rgba(255,80,80,0.14)", borderRadius: 10, padding: 10 }}>{err.message}</pre>
+      <button onClick={() => { localStorage.removeItem("vv_last_runtime_error"); setErr(null); }} style={{ ...btnSecondary, marginTop: 8 }}>Clear stored error</button>
+    </div>
   );
 }
 

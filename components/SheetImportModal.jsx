@@ -54,8 +54,8 @@ export default function SheetImportModal({ onClose, onImport, existingCount = 0 
       <div style={modal} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: T.text1 }}>Import from Google Sheets</div>
-            <div style={{ fontSize: 12, color: T.text4, marginTop: 4 }}>Use Sheets as a collection inbox. Supabase stays the real vault.</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: T.text1 }}>Import from Google Sheets</div>
+            <div style={{ fontSize: 12, color: T.text4, marginTop: 4 }}>Scan first, review rows, then bring them into Supabase.</div>
           </div>
           <button onClick={onClose} style={iconBtn}><Icon name="x" size={18} /></button>
         </div>
@@ -105,7 +105,7 @@ const backdrop = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", 
 const modal = { width: "min(720px, 96vw)", maxHeight: "90dvh", overflow: "auto", background: "rgba(14,14,14,0.98)", border: `1px solid ${T.border}`, borderRadius: 18, padding: 20, boxShadow: "0 24px 80px rgba(0,0,0,0.72)" };
 const label = { fontSize: 11, color: T.text4, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 };
 const input = { width: "100%", padding: "12px 13px", background: "rgba(255,255,255,0.07)", border: `1px solid ${T.border}`, borderRadius: 11, color: T.text1, fontSize: 13, outline: "none" };
-const hint = { fontSize: 11, color: T.text4, lineHeight: 1.45 };
+const hint = { fontSize: 11, color: T.text4, lineHeight: 1.5, padding: "10px 11px", borderRadius: 11, background: "rgba(255,255,255,0.035)", border: `1px solid ${T.borderSub}` };
 const primaryBtn = { padding: "10px 15px", background: "#fff", color: "#000", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" };
 const secondaryBtn = { padding: "10px 15px", background: "rgba(255,255,255,0.10)", color: T.text1, border: `1px solid ${T.border}`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" };
 const iconBtn = { width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,0.07)", border: `1px solid ${T.border}`, color: T.text2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
