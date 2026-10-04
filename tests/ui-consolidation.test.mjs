@@ -24,7 +24,8 @@ test("primary App Router destinations exist and remain feature gated", () => {
 
 test("Home implements the locked priority shelves", () => {
   const source = read("components/vault-v2/VaultV2.jsx");
-  const order = ["Continue","Recently Saved","Inbox","Recent Collections","Top Rated"].map((x) => source.indexOf(x));
+  const home = source.slice(source.indexOf('if(route==="home")'), source.indexOf('} else if(route==="library")'));
+  const order = ["Continue","Recently Saved","Inbox","Recent Collections","Top Rated"].map((x) => home.indexOf(x));
   assert.ok(order.every((i) => i >= 0), "all locked Home sections must exist");
   for (let i = 1; i < order.length; i++) assert.ok(order[i] > order[i - 1], "Home sections should preserve priority order");
 });
