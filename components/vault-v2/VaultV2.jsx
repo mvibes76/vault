@@ -269,7 +269,6 @@ export default function VaultV2({ route = "home" }) {
   };
 
   const deleteItem = async (item) => {
-    if (!window.confirm("Delete “" + (item.title || "this item") + "” from Vault?")) return;
     setItems((prev)=>prev.filter((x)=>x.key!==item.key));
     setDetailItem(null);
     if (user) await removeVaultItem(user.id,item.key);
