@@ -30,7 +30,7 @@ function shouldSkipIframe(url) {
   return /(^|\.)(google\.com|duckduckgo\.com|bing\.com|youtube\.com|youtu\.be|reddit\.com|instagram\.com|tiktok\.com|facebook\.com|x\.com|twitter\.com)$/i.test(host);
 }
 
-export default function InAppBrowser({ onClose, onSave, folders = [], isMobile = false, onCreateFolder }) {
+export default function InAppBrowser({ onClose, onSave, folders = [], isMobile = false, onCreateFolder, initialQuery = "" }) {
   const [address, setAddress] = useState("");
   const [currentUrl, setCurrentUrl] = useState("");
   const [history, setHistory] = useState([]);
@@ -119,6 +119,15 @@ export default function InAppBrowser({ onClose, onSave, folders = [], isMobile =
       setSearchState("fail");
     }
   };
+
+  useEffect(() => {
+    const q = String(initialQuery || "").trim();
+    if (!q) return;
+    setAddress(q);
+    runSearch(q);
+    // Initial search should run once when this browser instance opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openUrl = (url, { addHistory = true } = {}) => {
     const target = normalizeUrl(url);
