@@ -1,0 +1,51 @@
+name: Milestone 2 dependency audit
+
+on:
+  push:
+    branches: [milestone2-security-gate]
+    paths:
+      - package.json
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: milestone2-security-gate
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Regenerate public npm lockfile
+        run: npm install --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org
+      - name: Audit dependencies
+        id: audit
+        shell: bash
+        run: |
+          npm audit --json > audit.json || true
+          node - <<'NODE'
+          const fs = require('fs');
+          const audit = JSON.parse(fs.readFileSync('audit.json','utf8'));
+          const v = audit.metadata?.vulnerabilities || {};
+          console.log('AUDIT_SUMMARY ' + JSON.stringify(v));
+          const blocking = Number(v.high || 0) + Number(v.critical || 0);
+          if (blocking > 0) {
+            console.error('Blocking high/critical vulnerabilities remain:', blocking);
+            process.exit(1);
+          }
+          NODE
+      - name: Commit refreshed lockfile
+        run: |
+          git config user.name "vault-security-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --cached --quiet; then
+            echo "Lockfile already current"
+          else
+            git commit -m "chore: refresh public npm lockfile"
+            git push origin HEAD:milestone2-security-gate
+          fi
