@@ -13,7 +13,7 @@ import InAppBrowser from "@/components/InAppBrowser";
 
 import {
   supabase, getVaultItems, getUserData, getFolders, getCoverLibrary,
-  upsertVaultItem, removeVaultItem,
+  upsertVaultItem, removeVaultItem, deleteVaultMedia,
   toggleFavorite, setItemFolder, setItemRating,
   createFolder, recordItemView, addMomentMark,
 } from "@/lib/supabase";
@@ -54,6 +54,7 @@ function mediaType(item) {
   if (raw === "image" || source === "image") return "image";
   if (raw === "pdf" || source === "pdf") return "pdf";
   if (raw === "video" || ["youtube","vimeo","drive","tiktok","facebook","instagram","twitch","twitch-vod","twitch-clip","dailymotion","streamable","wistia","dropbox","hls","file"].includes(source)) return "video";
+  if (raw === "audio" || source === "audio") return "audio";
   return "link";
 }
 
@@ -103,7 +104,7 @@ function FilterFields({ filters, setFilters, folders }) {
   return (
     <>
       <select className="v2-filter" aria-label="Filter by type" value={filters.type} onChange={(e)=>setFilters((x)=>({...x,type:e.target.value}))}>
-        <option value="all">All types</option><option value="video">Video</option><option value="image">Images</option><option value="pdf">PDFs</option><option value="link">Links</option>
+        <option value="all">All types</option><option value="video">Video</option><option value="image">Images</option><option value="audio">Audio</option><option value="pdf">PDFs</option><option value="link">Links</option>
       </select>
       <select className="v2-filter" aria-label="Filter by collection" value={filters.collection} onChange={(e)=>setFilters((x)=>({...x,collection:e.target.value}))}>
         <option value="all">All collections</option><option value="inbox">Inbox</option>
@@ -302,9 +303,12 @@ export default function VaultV2({ route = "home" }) {
   };
 
   const deleteItem = async (item) => {
+    if (user && item?.isUploadedMedia && item?.canonical_url) {
+      await deleteVaultMedia(user.id,item.canonical_url);
+    }
+    if (user) await removeVaultItem(user.id,item.key);
     setItems((prev)=>prev.filter((x)=>x.key!==item.key));
     setDetailItem(null);
-    if (user) await removeVaultItem(user.id,item.key);
     fetch("/api/sheets-sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",key:item.key})}).catch(()=>{});
   };
 
@@ -514,7 +518,7 @@ export default function VaultV2({ route = "home" }) {
         )}
       </nav>
 
-      <AddMediaSheet open={addOpen||!!editItem} initialItem={editItem} onClose={()=>{setAddOpen(false);setEditItem(null)}} onSave={saveItem} folders={folders} onCreateCollection={createCollection}/>
+      <AddMediaSheet open={addOpen||!!editItem} initialItem={editItem} userId={user?.id} onClose={()=>{setAddOpen(false);setEditItem(null)}} onSave={saveItem} folders={folders} onCreateCollection={createCollection}/>
       <DetailDrawer
         item={detailItem}
         state={detailItem?userData[detailItem.key]||{}:{}}
