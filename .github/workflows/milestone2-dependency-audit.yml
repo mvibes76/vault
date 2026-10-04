@@ -21,8 +21,10 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
-      - name: Regenerate public npm lockfile
-        run: npm install --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org
+      - name: Regenerate public npm lockfile from scratch
+        run: |
+          rm -f package-lock.json
+          npm install --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org
       - name: Apply non-breaking npm audit fixes to lockfile
         run: npm audit fix --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org || true
       - name: Audit dependencies
@@ -53,6 +55,10 @@ jobs:
             process.exit(1);
           }
           NODE
+      - name: Install clean dependency graph
+        run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
+      - name: Run tests and production compile
+        run: npm run build
       - name: Commit refreshed lockfile
         run: |
           git config user.name "vault-security-bot"
