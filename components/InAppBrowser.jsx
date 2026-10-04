@@ -47,6 +47,7 @@ export default function InAppBrowser({ onClose, onSave, folders = [], isMobile =
   const [searchState, setSearchState] = useState("idle");
   const [searchResults, setSearchResults] = useState([]);
   const [searchError, setSearchError] = useState("");
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -56,6 +57,20 @@ export default function InAppBrowser({ onClose, onSave, folders = [], isMobile =
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined" || !window.visualViewport) return;
+    const viewport = window.visualViewport;
+    const baseline = window.innerHeight;
+    const update = () => setKeyboardOpen(viewport.height < baseline * 0.78);
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, [isMobile]);
 
   useEffect(() => {
     if (!currentUrl) return;
@@ -254,7 +269,7 @@ export default function InAppBrowser({ onClose, onSave, folders = [], isMobile =
           </div>
         )}
 
-        <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 340px" }}>
+        <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 340px", gridTemplateRows: isMobile ? (keyboardOpen ? "minmax(0,1fr)" : "minmax(0,1fr) auto") : undefined }}>
           <div style={{ minHeight: 0, background: "#050505", position: "relative", overflowY: "auto" }}>
             {!currentUrl && !searchQuery ? (
               <EmptySearch />
@@ -270,7 +285,14 @@ export default function InAppBrowser({ onClose, onSave, folders = [], isMobile =
             )}
           </div>
 
-          <div style={{ borderLeft: isMobile ? "none" : `1px solid ${T.borderSub}`, borderTop: isMobile ? `1px solid ${T.borderSub}` : "none", padding: 14, background: "rgba(255,255,255,0.025)", overflowY: "auto" }}>
+          <div style={{
+            borderLeft: isMobile ? "none" : `1px solid ${T.borderSub}`,
+            borderTop: isMobile ? `1px solid ${T.borderSub}` : "none",
+            padding: keyboardOpen && isMobile ? 0 : 14,
+            background: "rgba(255,255,255,0.025)",
+            overflowY: "auto",
+            display: keyboardOpen && isMobile ? "none" : "block",
+          }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: T.text1 }}>Quick save</div>
               {metaState === "checking" && <span style={{ fontSize: 11, color: T.text4 }}>Reading link...</span>}
@@ -355,7 +377,7 @@ function BlockedPreview({ url, host, onOpen }) {
   </div>;
 }
 
-const inputStyle = { flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.06)", color: T.text1, fontSize: 13, outline: "none" };
+const inputStyle = { flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.06)", color: T.text1, fontSize: 16, outline: "none" };
 const plainBtn = { background: "transparent", border: "none", color: T.text3, cursor: "pointer", fontSize: 11 };
 const ellipsis = { fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const loadBadge = { position: "absolute", top: 10, left: 10, zIndex: 2, padding: "5px 8px", borderRadius: 999, background: "rgba(0,0,0,0.72)", color: T.text3, fontSize: 11 };
