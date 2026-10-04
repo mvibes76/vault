@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 const DDG_HTML = "https://duckduckgo.com/html/";
 const DDG_LITE = "https://lite.duckduckgo.com/lite/";
+const BING_HTML = "https://www.bing.com/search";
 const MAX_SEARCH_HTML_BYTES = 1_000_000;
 
 function decodeEntities(value = "") {
@@ -81,10 +82,38 @@ function parseLiteResults(html) {
   return out;
 }
 
+function parseBingResults(html) {
+  const out = [];
+  const blockRe = /<li[^>]+class=["'][^"']*b_algo[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi;
+  let blockMatch;
+  while ((blockMatch = blockRe.exec(html))) {
+    const block = blockMatch[1];
+    const linkMatch = block.match(/<h2[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (!linkMatch) continue;
+    const url = decodeEntities(linkMatch[1]);
+    if (!/^https?:\/\//i.test(url)) continue;
+    const title = stripTags(linkMatch[2]);
+    if (!title || out.some((r) => r.url === url)) continue;
+    const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+    out.push({
+      title,
+      url,
+      snippet: snippetMatch ? stripTags(snippetMatch[1]) : "",
+      host: hostOf(url),
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
 async function searchProvider(baseUrl, q, parser) {
   const url = new URL(baseUrl);
   url.searchParams.set("q", q);
-  url.searchParams.set("kl", "us-en");
+  if (url.hostname.includes("duckduckgo.com")) url.searchParams.set("kl", "us-en");
+  if (url.hostname.includes("bing.com")) {
+    url.searchParams.set("setlang", "en-us");
+    url.searchParams.set("cc", "us");
+  }
 
   const upstream = await safeFetch(url.toString(), {
     method: "GET",
@@ -112,6 +141,7 @@ export async function GET(req) {
   const attempts = [
     { provider: "duckduckgo-html", url: DDG_HTML, parser: parseResults },
     { provider: "duckduckgo-lite", url: DDG_LITE, parser: parseLiteResults },
+    { provider: "bing-html", url: BING_HTML, parser: parseBingResults },
   ];
 
   let lastError = null;
