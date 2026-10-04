@@ -55,5 +55,6 @@ test("Search exposes the protected external browser flow", () => {
   assert.match(browser, /initialQuery = ""/);
   assert.match(route, /guardProxyRequest\(req, "search"\)/);
   assert.match(route, /safeFetch\(DDG_HTML/);
+  assert.match(route, /body:\s*body\.toString\(\)/);
   assert.doesNotMatch(route, /fetch\(DDG_HTML/);
 });
