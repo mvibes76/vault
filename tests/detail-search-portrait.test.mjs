@@ -54,7 +54,7 @@ test("Search exposes the protected external browser flow", () => {
   assert.match(browser, /\/api\/browser-search\?q=/);
   assert.match(browser, /initialQuery = ""/);
   assert.match(route, /guardProxyRequest\(req, "search"\)/);
-  assert.match(route, /searchProvider\\(attempt\\.url, q, attempt\\.parser, attempt\\.params \\|\\| \\{\\}\\)/);
+  assert.match(route, /searchProvider\(attempt\.url, q, attempt\.parser, attempt\.params \|\| \{\}\)/);
   assert.match(route, /duckduckgo-html/);
   assert.match(route, /duckduckgo-lite/);
   assert.match(route, /bing-html/);
