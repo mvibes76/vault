@@ -16,9 +16,62 @@ function formatTime(seconds) {
   return h ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}` : `${m}:${String(s).padStart(2,"0")}`;
 }
 
+function DetailPreview({ item, isImage }) {
+  const [metaThumb, setMetaThumb] = useState("");
+  const [idx, setIdx] = useState(0);
+
+  const rawCandidates = useMemo(() => {
+    const provider = getThumbCandidates(item?.url || "");
+    return [...new Set([
+      item?.display_thumbnail,
+      item?.thumbnail,
+      metaThumb,
+      ...provider,
+      isImage ? item?.url : "",
+    ].filter(Boolean))];
+  }, [item, isImage, metaThumb]);
+
+  const candidates = useMemo(() => rawCandidates.flatMap((url) => {
+    const proxied = proxiedMediaUrl(url);
+    return proxied && proxied !== url ? [proxied, url] : [url];
+  }), [rawCandidates]);
+
+  useEffect(() => {
+    setIdx(0);
+    setMetaThumb("");
+    if (!item?.url) return;
+    let active = true;
+    fetch(`/api/metadata?url=${encodeURIComponent(item.url)}`, { cache: "no-store" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((meta) => {
+        if (!active || !meta?.thumbnail) return;
+        setMetaThumb(meta.thumbnail);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [item?.key, item?.url]);
+
+  const src = candidates[idx] || "";
+  if (!src) return <div className="v2-detail-preview-fallback"><Icon name={isImage ? "grid" : "video"} size={30}/><span>Preview unavailable</span></div>;
+
+  return (
+    <img
+      key={src}
+      src={src}
+      alt={item?.title ? `${item.title} preview` : ""}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={() => setIdx((n) => n + 1)}
+      style={isImage ? { objectFit:"contain" } : undefined}
+    />
+  );
+}
+
 export default function DetailDrawer({
   item, state = {}, folders = [], userId,
   onClose, onPlay, onFavorite, onFolder, onRating, onEdit, onDelete,
+  onNavigate, currentIndex = -1, totalItems = 0,
   activityRevision = 0,
 }) {
   const ref = useRef(null);
@@ -28,9 +81,11 @@ export default function DetailDrawer({
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const swipeStart = useRef(null);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < totalItems - 1;
 
   const source = useMemo(() => getSourceMeta(item?.url || ""), [item?.url]);
-  const thumb = item?.display_thumbnail || item?.thumbnail || getThumbCandidates(item?.url || "")[0] || "";
   const isImage = source.id === "image" || String(item?.type || "").toLowerCase().includes("image");
   const duration = Number(state?.duration || 0);
   const progress = Number(state?.progress || 0);
@@ -55,6 +110,10 @@ export default function DetailDrawer({
     close?.focus();
     const handler = (event) => {
       if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      const tag = String(document.activeElement?.tagName || "").toLowerCase();
+      const editing = tag === "input" || tag === "textarea" || tag === "select" || document.activeElement?.isContentEditable;
+      if (!editing && event.key === "ArrowLeft" && hasPrev) { event.preventDefault(); onNavigate?.(currentIndex - 1); return; }
+      if (!editing && event.key === "ArrowRight" && hasNext) { event.preventDefault(); onNavigate?.(currentIndex + 1); return; }
       if (event.key !== "Tab") return;
       const nodes = [...root.querySelectorAll('button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')];
       if (!nodes.length) return;
@@ -64,7 +123,7 @@ export default function DetailDrawer({
     };
     document.addEventListener("keydown", handler);
     return () => { document.removeEventListener("keydown", handler); before?.focus?.(); };
-  }, [item, onClose]);
+  }, [item, onClose, hasPrev, hasNext, currentIndex, onNavigate]);
 
   if (!item) return null;
 
@@ -88,14 +147,42 @@ export default function DetailDrawer({
   return (
     <>
       <div className="v2-backdrop" onMouseDown={onClose} aria-hidden="true" />
-      <aside ref={ref} className="v2-drawer" role="dialog" aria-modal="true" aria-labelledby="v2-detail-title">
+      <aside
+        ref={ref}
+        className="v2-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="v2-detail-title"
+        onTouchStart={(e) => {
+          const t = e.touches?.[0];
+          if (t) swipeStart.current = { x:t.clientX, y:t.clientY };
+        }}
+        onTouchEnd={(e) => {
+          const start = swipeStart.current;
+          const t = e.changedTouches?.[0];
+          swipeStart.current = null;
+          if (!start || !t) return;
+          const dx = t.clientX - start.x;
+          const dy = t.clientY - start.y;
+          if (Math.abs(dx) < 72 || Math.abs(dy) > 64) return;
+          if (dx < 0 && hasNext) onNavigate?.(currentIndex + 1);
+          if (dx > 0 && hasPrev) onNavigate?.(currentIndex - 1);
+        }}
+      >
         <div className="v2-drawer-head">
-          <span className="v2-hint">Item detail</span>
-          <button data-close type="button" className="v2-iconbtn" onClick={onClose} aria-label="Close item detail"><Icon name="x" size={18}/></button>
+          <div className="v2-detail-pager">
+            <button type="button" className="v2-iconbtn" onClick={() => onNavigate?.(currentIndex - 1)} disabled={!hasPrev} aria-label="Previous media"><Icon name="chevronLeft" size={18}/></button>
+            <span className="v2-hint">{currentIndex >= 0 && totalItems ? `${currentIndex + 1} of ${totalItems}` : "Item detail"}</span>
+            <button type="button" className="v2-iconbtn" onClick={() => onNavigate?.(currentIndex + 1)} disabled={!hasNext} aria-label="Next media"><Icon name="chevronRight" size={18}/></button>
+          </div>
+          <div className="v2-detail-head-actions">
+            <button type="button" className="v2-iconbtn v2-iconbtn-danger" onClick={() => setConfirmDelete(true)} aria-label="Delete media"><Icon name="trash" size={17}/></button>
+            <button data-close type="button" className="v2-iconbtn" onClick={onClose} aria-label="Close item detail"><Icon name="x" size={18}/></button>
+          </div>
         </div>
         <div className="v2-drawer-scroll">
-          <div className="v2-detail-art" style={isImage ? { aspectRatio:"4 / 5", maxHeight:420, marginInline:"auto", background:"#080809" } : undefined}>
-            {thumb ? <img src={proxiedMediaUrl(thumb)} alt={item.title ? `${item.title} preview` : ""} loading="lazy" style={isImage ? { objectFit:"contain" } : undefined} /> : null}
+          <div className="v2-detail-art" style={isImage ? { aspectRatio:"4 / 5", maxHeight:520, marginInline:"auto", background:"#080809" } : undefined}>
+            <DetailPreview item={item} isImage={isImage} />
           </div>
           <h2 className="v2-detail-title" id="v2-detail-title">{item.title || item.url}</h2>
           <div className="v2-detail-source">{source.name}{item.folder || state.folder ? ` · ${item.folder || state.folder}` : " · Inbox"}</div>
@@ -106,6 +193,15 @@ export default function DetailDrawer({
               <Icon name="star" size={15} filled={!!state.favorite}/>{state.favorite ? "Favorited" : "Favorite"}
             </button>
           </div>
+          {confirmDelete ? (
+            <div className="v2-delete-confirm" role="alert">
+              <span>Delete “{item.title || "this item"}” from Vault?</span>
+              <div>
+                <button type="button" className="v2-btn v2-btn-danger" onClick={() => onDelete(item)}>Delete</button>
+                <button type="button" className="v2-btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="v2-detail-block">
             <div className="v2-detail-label">Collection</div>
