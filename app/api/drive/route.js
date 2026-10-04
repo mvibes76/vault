@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { safeFetch, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
+
+const MAX_HTML_BYTES = 1_500_000;
 
 // Lists files in a PUBLIC Google Drive folder
 // Uses the embeddedfolderview page which works for any publicly-shared folder
@@ -9,19 +13,22 @@ export async function GET(request) {
   if (!folderId) {
     return NextResponse.json({ error: "Missing folder id" }, { status: 400 });
   }
+  if (!/^[A-Za-z0-9_-]{10,160}$/.test(folderId)) return NextResponse.json({ error: "Invalid folder id" }, { status: 400 });
+  try { await guardProxyRequest(request, "file"); }
+  catch (error) { return securityErrorResponse(error, "Drive folder unavailable"); }
 
   try {
     const url = `https://drive.google.com/embeddedfolderview?id=${folderId}#list`;
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0" },
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     });
 
     if (!res.ok) {
       throw new Error(`Folder not accessible (${res.status}). Make sure it is shared as Anyone with link can view.`);
     }
 
-    const html = await res.text();
+    const html = await readTextLimited(res, MAX_HTML_BYTES);
 
     // Files appear as entries with: flip-entry-info contains href="https://drive.google.com/file/d/FILE_ID/view"
     // and the name in flip-entry-title
@@ -57,7 +64,7 @@ export async function GET(request) {
 
     return NextResponse.json({ files });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return securityErrorResponse(err, "Drive folder unavailable");
   }
 }
 
