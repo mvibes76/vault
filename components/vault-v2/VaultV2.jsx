@@ -9,6 +9,7 @@ import SyncStatus from "@/components/SyncStatus";
 import MediaCard from "./MediaCard";
 import AddMediaSheet from "./AddMediaSheet";
 import DetailDrawer from "./DetailDrawer";
+import InAppBrowser from "@/components/InAppBrowser";
 
 import {
   supabase, getVaultItems, getUserData, getFolders, getCoverLibrary,
@@ -191,6 +192,8 @@ export default function VaultV2({ route = "home" }) {
   const [editItem, setEditItem] = useState(null);
   const [mobileControl, setMobileControl] = useState(null);
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [mobileBrowser, setMobileBrowser] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(60);
@@ -249,8 +252,15 @@ export default function VaultV2({ route = "home" }) {
 
   useEffect(() => {
     const sync = () => setOnline(navigator.onLine);
-    sync(); window.addEventListener("online",sync); window.addEventListener("offline",sync);
-    return () => { window.removeEventListener("online",sync); window.removeEventListener("offline",sync); };
+    const syncMobile = () => setMobileBrowser(window.matchMedia("(max-width: 899px)").matches);
+    sync(); syncMobile();
+    window.addEventListener("online",sync); window.addEventListener("offline",sync);
+    window.addEventListener("resize", syncMobile);
+    return () => {
+      window.removeEventListener("online",sync);
+      window.removeEventListener("offline",sync);
+      window.removeEventListener("resize", syncMobile);
+    };
   }, []);
 
   useEffect(() => {
@@ -379,6 +389,15 @@ export default function VaultV2({ route = "home" }) {
 
   const collectionItems = useMemo(()=>selectedCollection ? displayItems.filter((i)=>folderFor(i,userData[i.key]||{})===selectedCollection) : [],[displayItems,userData,selectedCollection]);
 
+  const detailContextItems = useMemo(() => {
+    if (route === "inbox") return inboxItems;
+    if (route === "collections" && selectedCollection) return collectionItems;
+    if (route === "library" || route === "search") return allFiltered;
+    return displayItems;
+  }, [route, selectedCollection, inboxItems, collectionItems, allFiltered, displayItems]);
+
+  const detailIndex = detailItem ? detailContextItems.findIndex((item) => item.key === detailItem.key) : -1;
+
   const globalSearchSubmit=(e)=>{
     e.preventDefault();
     router.push(query.trim()?"/search?q="+encodeURIComponent(query.trim()):"/search");
@@ -431,7 +450,24 @@ export default function VaultV2({ route = "home" }) {
   } else if(route==="inbox") {
     page = <><div className="v2-hero"><div className="v2-eyebrow">{inboxItems.length} waiting</div><h1 className="v2-h1">Inbox</h1><p className="v2-lead">Anything saved without a Collection lands here. Assign a Collection from item detail when you are ready.</p></div>{renderGrid(inboxItems,"Inbox cleared","Every saved item is organized into a Collection.")}</>;
   } else if(route==="search") {
-    page = <><div className="v2-hero"><div className="v2-eyebrow">Find anything</div><h1 className="v2-h1">{query ? "Results for “"+query+"”" : "Search"}</h1><p className="v2-lead">Search titles, URLs, notes, tags, sources, and Collections.</p></div>{filtersBar}{query.trim()?renderGrid(allFiltered,"No results","Try another phrase or clear a filter."):<EmptyState icon="search" title="Search your Vault" text="Use the search field above to find any saved reference."/>}</>;
+    page = <>
+      <div className="v2-hero">
+        <div className="v2-eyebrow">Find anything</div>
+        <h1 className="v2-h1">{query ? "Results for “"+query+"”" : "Search"}</h1>
+        <p className="v2-lead">Search your Vault first, or safely search the web and save a result directly into your library.</p>
+      </div>
+      <div className="v2-web-search-card">
+        <div>
+          <div className="v2-section-title">Search outside Vault</div>
+          <div className="v2-section-sub">Server-side search results only. Preview when allowed, then save the source URL into Vault.</div>
+        </div>
+        <button type="button" className="v2-btn v2-btn-primary" onClick={()=>setBrowserOpen(true)}>
+          <Icon name="search" size={15}/> Search the web
+        </button>
+      </div>
+      {filtersBar}
+      {query.trim()?renderGrid(allFiltered,"No Vault results","Try web search for this phrase, or clear a filter."):<EmptyState icon="search" title="Search your Vault" text="Use the search field above, or search the web for something new to save." action={()=>setBrowserOpen(true)} actionLabel="Search the web"/>}
+    </>;
   } else if(route==="collections") {
     page = selectedCollection ? <><div className="v2-hero"><button className="v2-linkbtn" onClick={()=>router.push("/collections")}>← All Collections</button><div className="v2-eyebrow">Collection</div><h1 className="v2-h1">{selectedCollection}</h1><p className="v2-lead">{collectionItems.length} item{collectionItems.length===1?"":"s"}</p></div>{renderGrid(collectionItems,"Collection is empty","Add media and choose this Collection as its destination.")}</> : <><div className="v2-hero"><div className="v2-eyebrow">Organize without clutter</div><h1 className="v2-h1">Collections</h1><p className="v2-lead">Folders and galleries share one simple product concept: Collections.</p></div><div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><button className="v2-btn v2-btn-primary" onClick={()=>setNewCollectionOpen(true)}><Icon name="plus" size={15}/> New Collection</button></div>{folders.length?<div className="v2-collection-grid">{folders.map((f)=>{const count=displayItems.filter((i)=>folderFor(i,userData[i.key]||{})===f.name).length;return <button className="v2-collection" key={f.name} onClick={()=>router.push("/collections?folder="+encodeURIComponent(f.name))}><div className="v2-collection-icon"><Icon name="folder" size={20}/></div><div><div className="v2-collection-name">{f.name}</div><div className="v2-collection-count">{count} item{count===1?"":"s"}{f.parent_folder?" · in "+f.parent_folder:""}</div></div></button>})}</div>:<EmptyState icon="folder" title="No Collections yet" text="Create a Collection to organize related media." action={()=>setNewCollectionOpen(true)} actionLabel="New Collection"/>}</>;
   } else {
@@ -479,9 +515,36 @@ export default function VaultV2({ route = "home" }) {
       </nav>
 
       <AddMediaSheet open={addOpen||!!editItem} initialItem={editItem} onClose={()=>{setAddOpen(false);setEditItem(null)}} onSave={saveItem} folders={folders} onCreateCollection={createCollection}/>
-      <DetailDrawer item={detailItem} state={detailItem?userData[detailItem.key]||{}:{}} folders={folders} userId={user?.id} activityRevision={activityRevision} onClose={()=>setDetailItem(null)} onPlay={play} onFavorite={toggleFav} onFolder={assignFolder} onRating={rateItem} onEdit={(item)=>{setEditItem(item);setDetailItem(null)}} onDelete={deleteItem}/>
+      <DetailDrawer
+        item={detailItem}
+        state={detailItem?userData[detailItem.key]||{}:{}}
+        folders={folders}
+        userId={user?.id}
+        activityRevision={activityRevision}
+        currentIndex={detailIndex}
+        totalItems={detailContextItems.length}
+        onNavigate={(idx)=>{ const next=detailContextItems[idx]; if(next) setDetailItem(next); }}
+        onClose={()=>setDetailItem(null)}
+        onPlay={play}
+        onFavorite={toggleFav}
+        onFolder={assignFolder}
+        onRating={rateItem}
+        onEdit={(item)=>{setEditItem(item);setDetailItem(null)}}
+        onDelete={deleteItem}
+      />
 
       <MobileControlSheet kind={mobileControl} filters={filters} setFilters={setFilters} sort={sort} setSort={setSort} folders={folders} onClose={()=>setMobileControl(null)}/>
+
+      {browserOpen ? (
+        <InAppBrowser
+          onClose={()=>setBrowserOpen(false)}
+          onSave={saveItem}
+          folders={folders}
+          isMobile={mobileBrowser}
+          onCreateFolder={createCollection}
+          initialQuery={query}
+        />
+      ) : null}
 
       {newCollectionOpen ? <>
         <div className="v2-backdrop" onMouseDown={()=>setNewCollectionOpen(false)} aria-hidden="true"/>
