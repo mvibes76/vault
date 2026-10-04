@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { safeFetch, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DDG_HTML = "https://html.duckduckgo.com/html/";
+const MAX_SEARCH_HTML_BYTES = 1_000_000;
 
 function decodeEntities(value = "") {
   return String(value)
@@ -59,9 +62,8 @@ export async function GET(req) {
   const q = String(searchParams.get("q") || "").trim();
   if (!q) return NextResponse.json({ results: [] });
   if (q.length > 180) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 7000);
+  try { await guardProxyRequest(req, "search"); }
+  catch (error) { return securityErrorResponse(error, "Search unavailable"); }
 
   try {
     const body = new URLSearchParams({
@@ -70,24 +72,24 @@ export async function GET(req) {
       kad: "en_US",
       k1: "-1",
     });
-    const upstream = await fetch(DDG_HTML, {
+    const upstream = await safeFetch(DDG_HTML, {
       method: "POST",
       body,
-      signal: controller.signal,
+      timeoutMs: 7000,
+      maxBytes: MAX_SEARCH_HTML_BYTES,
       headers: {
         "content-type": "application/x-www-form-urlencoded",
         "accept-language": "en-US,en;q=0.9",
         "user-agent": "Mozilla/5.0 (compatible; VideoVaultSearch/1.0)",
       },
-      cache: "no-store",
     });
-    const html = await upstream.text();
+    if (!upstream.ok) throw new Error("Search provider unavailable");
+    const html = await readTextLimited(upstream, MAX_SEARCH_HTML_BYTES);
     const results = parseResults(html);
     return NextResponse.json({ query: q, locale: "us-en", results });
   } catch (error) {
-    const message = error?.name === "AbortError" ? "Search timed out" : "Search failed";
-    return NextResponse.json({ error: message, results: [] }, { status: 502 });
-  } finally {
-    clearTimeout(timeout);
+    const response = securityErrorResponse(error, "Search failed");
+    const data = await response.json();
+    return NextResponse.json({ ...data, results: [] }, { status: response.status, headers: response.headers });
   }
 }

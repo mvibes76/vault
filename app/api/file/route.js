@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { safeFetch, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
+
+const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+const MAX_BYTES = Number(process.env.MEDIA_RELAY_MAX_BYTES || DEFAULT_MAX_BYTES);
+const MAX_CONFIRM_HTML_BYTES = 1_000_000;
 
 // Proxies Google Drive files with byte-range support.
 // Three.js model loaders can fetch through this to avoid CORS.
@@ -10,6 +16,8 @@ export async function GET(request) {
   if (!fileId) {
     return NextResponse.json({ error: "Missing file id" }, { status: 400 });
   }
+  try { await guardProxyRequest(request, "file"); }
+  catch (error) { return securityErrorResponse(error, "File unavailable"); }
 
   try {
     const range = request.headers.get("range");
@@ -19,10 +27,10 @@ export async function GET(request) {
     if (range) upstreamHeaders.Range = range;
 
     const resolvedUrl = await resolveDriveDownloadUrl(fileId);
-    const res = await fetch(resolvedUrl, {
+    const res = await safeFetch(resolvedUrl, {
       headers: upstreamHeaders,
-      redirect: "follow",
-      signal: AbortSignal.timeout(60000),
+      timeoutMs: 60000,
+      maxBytes: MAX_BYTES,
     });
 
     if (!res.ok && res.status !== 206) {
@@ -44,8 +52,8 @@ export async function GET(request) {
       if (value) headers.set(key, value);
     }
 
-    headers.set("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=86400");
-    headers.set("Access-Control-Allow-Origin", "*");
+    headers.set("Cache-Control", "private, max-age=900");
+    headers.set("Cross-Origin-Resource-Policy", "same-origin");
     headers.set("Access-Control-Allow-Headers", "Range, Content-Type");
     headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
     if (!headers.has("Accept-Ranges")) headers.set("Accept-Ranges", "bytes");
@@ -55,22 +63,24 @@ export async function GET(request) {
       headers,
     });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return securityErrorResponse(err, "File unavailable");
   }
 }
 
 async function resolveDriveDownloadUrl(fileId) {
   let url = `https://drive.google.com/uc?export=download&id=${fileId}`;
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     headers: { "User-Agent": "Mozilla/5.0" },
-    redirect: "follow",
-    signal: AbortSignal.timeout(30000),
+    timeoutMs: 30000,
   });
 
   const contentType = res.headers.get("content-type") || "";
-  if (!contentType.includes("text/html")) return url;
+  if (!contentType.includes("text/html")) {
+    try { await res.body?.cancel(); } catch {}
+    return res.url || url;
+  }
 
-  const html = await res.text();
+  const html = await readTextLimited(res, MAX_CONFIRM_HTML_BYTES);
   const confirmMatch =
     html.match(/confirm=([a-zA-Z0-9-_]+)/) ||
     html.match(/name="confirm" value="([^"]+)"/);

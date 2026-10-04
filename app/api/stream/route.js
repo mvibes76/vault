@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { safeFetch, validatePublicUrl, encodedApiUrl } from "@/lib/server/safe-url";
+import { safeFetch, validatePublicUrl, encodedApiUrl, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,11 +8,14 @@ export const dynamic = "force-dynamic";
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36";
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024; // 512 MB safety cap for direct files
 const MAX_BYTES = Number(process.env.MEDIA_RELAY_MAX_BYTES || DEFAULT_MAX_BYTES);
+const MAX_HLS_BYTES = 2 * 1024 * 1024;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const rawUrl = searchParams.get("url");
   if (!rawUrl) return NextResponse.json({ error: "Missing url" }, { status: 400 });
+  try { await guardProxyRequest(request, "stream"); }
+  catch (error) { return securityErrorResponse(error, "Relay unavailable"); }
 
   const checked = await validatePublicUrl(rawUrl);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
@@ -28,7 +32,8 @@ export async function GET(request) {
   try {
     const upstream = await safeFetch(checked.url.href, {
       headers,
-      signal: AbortSignal.timeout(45000),
+      timeoutMs: 45000,
+      maxBytes: MAX_BYTES,
     });
 
     if (!upstream.ok && upstream.status !== 206) {
@@ -41,8 +46,8 @@ export async function GET(request) {
     const isHls = urlLooksHls || /mpegurl|vnd\.apple\.mpegurl/i.test(contentType);
 
     if (isHls) {
-      const playlist = await upstream.text();
-      const rewritten = rewriteHlsPlaylist(playlist, checked.url.href);
+      const playlist = await readTextLimited(upstream, MAX_HLS_BYTES);
+      const rewritten = rewriteHlsPlaylist(playlist, upstream.url || checked.url.href);
       return new NextResponse(rewritten, {
         status: 200,
         headers: {
@@ -51,6 +56,13 @@ export async function GET(request) {
           "Access-Control-Allow-Origin": "*",
         },
       });
+    }
+
+    const directMedia = /^(video|audio)\//i.test(contentType) || /^(application\/(?:octet-stream|x-mpegurl|vnd\.apple\.mpegurl))/i.test(contentType);
+    const urlLooksMedia = /\.(mp4|webm|mov|m4v|m3u8|mp3|m4a|aac|ogg)(?:\?|$)/i.test(checked.url.pathname + checked.url.search);
+    if (!directMedia && !urlLooksMedia) {
+      try { await upstream.body?.cancel(); } catch {}
+      return NextResponse.json({ error: "Unsupported relay content type" }, { status: 415 });
     }
 
     if (contentLength > MAX_BYTES && !range) {
@@ -66,15 +78,14 @@ export async function GET(request) {
       if (value) out.set(key, value);
     });
     out.set("Cache-Control", "no-store");
-    out.set("Access-Control-Allow-Origin", "*");
-    out.set("Cross-Origin-Resource-Policy", "cross-origin");
+    out.set("Cross-Origin-Resource-Policy", "same-origin");
 
     return new NextResponse(upstream.body, {
       status: upstream.status,
       headers: out,
     });
   } catch (err) {
-    return NextResponse.json({ error: err.message || "Relay failed" }, { status: err.status || 502 });
+    return securityErrorResponse(err, "Relay failed");
   }
 }
 

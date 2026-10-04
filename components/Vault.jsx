@@ -20,6 +20,7 @@ import {
   getCoverLibrary, upsertCover, deleteCover,
 } from "@/lib/supabase";
 import { mergeRemoteItemsWithOutbox } from "@/lib/sync-outbox";
+import { ensureProxySession, SECURITY_V2_ENABLED } from "@/lib/security-session";
 
 const VIEW_MODES = [
   { id: "showcase", icon: "showcase", label: "Showcase" },
@@ -38,6 +39,7 @@ const SORT_OPTIONS = [
 
 export default function Vault() {
   const [user, setUser]               = useState(null);
+  const [, setProxySessionEpoch]       = useState(0);
   const [sheetId, setSheetId]         = useState(DEFAULT_SHEET_SOURCE.sheetId);
   const [manualTabs, setManualTabs]   = useState(null);
   const [sheetSources, setSheetSources] = useState(() => mergeSheetSources([]));
@@ -166,6 +168,14 @@ export default function Vault() {
         const u = data.session?.user;
         setUser(u || null);
         if (u) {
+          if (SECURITY_V2_ENABLED && data.session) {
+            try {
+              const epoch = await ensureProxySession(data.session);
+              setProxySessionEpoch(epoch || Date.now());
+            } catch {
+              setError("Secure media session is unavailable. Your Vault data is still safe; proxy previews are temporarily disabled.");
+            }
+          }
           const [ud, fl, settings, remoteQA, covers] = await Promise.all([
             getUserData(u.id), getFolders(u.id), getSettings(u.id), getVaultItems(u.id), getCoverLibrary(u.id),
           ]);
@@ -204,6 +214,21 @@ export default function Vault() {
     init();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!SECURITY_V2_ENABLED || !user || !supabase) return;
+    const refresh = async () => {
+      try {
+        const epoch = await ensureProxySession();
+        setProxySessionEpoch(epoch || Date.now());
+      } catch {
+        // Existing Vault data remains usable; protected proxy routes will return 401
+        // until the next successful refresh or page reload.
+      }
+    };
+    const timer = setInterval(refresh, 20 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [user]);
 
   const handleSaveConfig = async (id, newManualTabs) => {
     setSheetId(id);

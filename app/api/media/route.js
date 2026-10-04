@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { safeFetch, validatePublicUrl } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,8 @@ export async function GET(request) {
   const rawUrl = searchParams.get("url");
 
   if (!rawUrl) return NextResponse.json({ error: "Missing url" }, { status: 400 });
+  try { await guardProxyRequest(request, "media"); }
+  catch (error) { return securityErrorResponse(error, "Image unavailable"); }
 
   const checked = await validatePublicUrl(normalizeDriveImageUrl(rawUrl));
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
@@ -32,8 +35,8 @@ export async function GET(request) {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
       },
-      redirect: "follow",
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
+      maxBytes: MAX_IMAGE_BYTES,
     });
 
     if (!res.ok) throw new Error(`Media fetch failed (${res.status})`);
@@ -42,12 +45,14 @@ export async function GET(request) {
 
     // Hard reject anything that is not a safe raster image — no video, no audio, no SVG, no binary blobs.
     if (contentType.includes("svg")) {
+      try { await res.body?.cancel(); } catch {}
       return NextResponse.json({ error: "SVG proxying is not supported." }, { status: 415 });
     }
 
     if (!contentType.startsWith("image/")) {
+      try { await res.body?.cancel(); } catch {}
       return NextResponse.json(
-        { error: "Only image proxying is supported." },
+        { error: "Only raster image proxying is supported." },
         { status: 415 }
       );
     }
@@ -62,11 +67,11 @@ export async function GET(request) {
       const value = res.headers.get(key);
       if (value) out.set(key, value);
     });
-    out.set("Cache-Control", "public, s-maxage=86400, stale-while-revalidate=604800");
-    out.set("Access-Control-Allow-Origin", "*");
+    out.set("Cache-Control", "private, max-age=3600");
+    out.set("Cross-Origin-Resource-Policy", "same-origin");
 
     return new NextResponse(res.body, { status: 200, headers: out });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 502 });
+    return securityErrorResponse(err, "Image unavailable");
   }
 }

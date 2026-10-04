@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import { safeFetch, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
+
+const MAX_CSV_BYTES = 5 * 1024 * 1024;
+const MAX_REQUEST_BYTES = 256 * 1024;
 
 function itemKey(url) {
   let h = 0;
@@ -112,17 +117,23 @@ function normalizeTabRef(tabName) {
 async function fetchTab(sheetId, tabName) {
   const ref = normalizeTabRef(tabName);
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&${ref.qs}`;
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" });
+  const res = await safeFetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, timeoutMs: 10000, maxBytes: MAX_CSV_BYTES });
   if (!res.ok) throw new Error(`Could not fetch tab "${ref.label}" (${res.status}). Share the sheet as Anyone with link can view.`);
-  const text = await res.text();
+  const text = await readTextLimited(res, MAX_CSV_BYTES);
   if (text.trim().startsWith("<!")) throw new Error(`Tab "${ref.label}" is not public or does not exist.`);
   return text;
 }
 
 export async function POST(request) {
   try {
-    const { sheetId, tabNames = [], gid, tab } = await request.json();
+    await guardProxyRequest(request, "file");
+    const declared = Number(request.headers.get("content-length") || 0);
+    if (declared > MAX_REQUEST_BYTES) return NextResponse.json({ error: "Import request too large" }, { status: 413 });
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).byteLength > MAX_REQUEST_BYTES) return NextResponse.json({ error: "Import request too large" }, { status: 413 });
+    const { sheetId, tabNames = [], gid, tab } = JSON.parse(raw || "{}");
     if (!sheetId) return NextResponse.json({ error: "Missing sheetId" }, { status: 400 });
+    if (!/^[A-Za-z0-9_-]{20,160}$/.test(String(sheetId))) return NextResponse.json({ error: "Invalid sheetId" }, { status: 400 });
     const incomingTabs = Array.isArray(tabNames) && tabNames.length ? tabNames : [];
     if (tab) incomingTabs.unshift(tab);
     if (gid) incomingTabs.unshift(`gid:${gid}`);
@@ -147,6 +158,6 @@ export async function POST(request) {
     all.forEach((item) => byKey.set(item.key, item));
     return NextResponse.json({ items: [...byKey.values()], skipped, errors });
   } catch (e) {
-    return NextResponse.json({ error: e.message || "Sheet import failed." }, { status: 500 });
+    return securityErrorResponse(e, "Sheet import failed");
   }
 }

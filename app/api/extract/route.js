@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { safeFetch, validatePublicUrl } from "@/lib/server/safe-url";
+import { safeFetch, validatePublicUrl, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,10 +21,14 @@ export const dynamic = "force-dynamic";
 //     long-running worker, which is intentionally out of scope.
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const MAX_HTML_BYTES = 1_000_000;
+const MAX_JSON_BYTES = 1_000_000;
 
 export async function GET(request) {
   const target = new URL(request.url).searchParams.get("url");
   if (!target) return NextResponse.json({ error: "Missing url" }, { status: 400 });
+  try { await guardProxyRequest(request, "discovery"); }
+  catch (error) { return securityErrorResponse(error, "Extraction unavailable"); }
 
   const checked = await validatePublicUrl(target);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
@@ -42,8 +47,7 @@ export async function GET(request) {
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": parsed.origin + "/",
       },
-      redirect: "follow",
-      signal: AbortSignal.timeout(9000),
+      timeoutMs: 9000,
     });
 
     if (!res.ok) {
@@ -54,16 +58,17 @@ export async function GET(request) {
     if (!ct.includes("html") && !ct.includes("xml")) {
       // Sometimes the URL IS the video. If it's a direct video CT, just hand it back.
       if (/^(video|application\/(x-mpegurl|vnd\.apple\.mpegurl))/i.test(ct)) {
+        try { await res.body?.cancel(); } catch {}
         return NextResponse.json({
-          sources: [{ url: parsed.href, resolution: null, type: ct }],
+          sources: [{ url: res.url || parsed.href, resolution: null, type: ct }],
           title: null,
         }, { headers: { "Cache-Control": "no-store" } });
       }
       return NextResponse.json({ error: `Not an HTML page (${ct})` }, { status: 415 });
     }
 
-    const html = await res.text();
-    const sources = extractSources(html, parsed.href);
+    const html = await readTextLimited(res, MAX_HTML_BYTES);
+    const sources = extractSources(html, res.url || parsed.href);
     const title = extractTitle(html);
 
     if (sources.length === 0) {
@@ -77,7 +82,7 @@ export async function GET(request) {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (e) {
-    return NextResponse.json({ error: e.message || "Extraction failed" }, { status: 502 });
+    return securityErrorResponse(e, "Extraction failed");
   }
 }
 
@@ -95,11 +100,10 @@ async function extractRedditSources(parsed) {
         "Accept": "application/json,text/plain,*/*",
         "Accept-Language": "en-US,en;q=0.9",
       },
-      redirect: "follow",
-      signal: AbortSignal.timeout(9000),
+      timeoutMs: 9000,
     });
     if (!res.ok) return { sources: [] };
-    const data = await res.json();
+    const data = JSON.parse(await readTextLimited(res, MAX_JSON_BYTES));
     const post = data?.[0]?.data?.children?.[0]?.data;
     if (!post) return { sources: [] };
     const rv = post.secure_media?.reddit_video || post.media?.reddit_video || post.preview?.reddit_video_preview;
