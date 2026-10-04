@@ -7,6 +7,7 @@ import Sidebar from "./Sidebar";
 import BottomNav from "./BottomNav";
 import QuickAddModal from "./QuickAddModal";
 import SheetImportModal from "./SheetImportModal";
+import SyncStatus from "./SyncStatus";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { fetchTabData, itemKey, sourceIdOf, matchesCoverRule, proxiedMediaUrl, normalizeCoverUrl, DEFAULT_SHEET_SOURCE, mergeSheetSources } from "@/lib/utils";
@@ -18,6 +19,7 @@ import {
   getVaultItems, upsertVaultItem, removeVaultItem, setItemRating, addMomentMark, recordItemView, recordItemOil,
   getCoverLibrary, upsertCover, deleteCover,
 } from "@/lib/supabase";
+import { mergeRemoteItemsWithOutbox } from "@/lib/sync-outbox";
 
 const VIEW_MODES = [
   { id: "showcase", icon: "showcase", label: "Showcase" },
@@ -101,7 +103,7 @@ export default function Vault() {
       .channel(`vault-live-${user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "vault_items", filter: `user_id=eq.${user.id}` }, async () => {
         const items = await getVaultItems(user.id);
-        setQuickAdds(items);
+        setQuickAdds(mergeRemoteItemsWithOutbox(items));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "user_data", filter: `user_id=eq.${user.id}` }, async () => {
         const data = await getUserData(user.id);
@@ -168,9 +170,10 @@ export default function Vault() {
             getUserData(u.id), getFolders(u.id), getSettings(u.id), getVaultItems(u.id), getCoverLibrary(u.id),
           ]);
           setUserData(ud); setFolders(fl); setCoverLibrary(covers || []);
-          if (remoteQA.length > 0) {
-            setQuickAdds(remoteQA);
-            try { localStorage.setItem("vv_quick_adds", JSON.stringify(remoteQA)); } catch {}
+          const reconciledItems = mergeRemoteItemsWithOutbox(remoteQA);
+          if (reconciledItems.length > 0) {
+            setQuickAdds(reconciledItems);
+            try { localStorage.setItem("vv_quick_adds", JSON.stringify(reconciledItems)); } catch {}
           }
           if (settings?.view_mode) setViewMode(settings.view_mode);
           if (Array.isArray(settings?.cover_rules)) setCoverRules(settings.cover_rules);
@@ -862,6 +865,17 @@ export default function Vault() {
       />
 
       <div style={{ flex: 1, minWidth: 0, paddingBottom: bottomPad, display: "flex", flexDirection: "column", minHeight: "100dvh" }}>
+        <SyncStatus
+          userId={user?.id}
+          onSynced={async () => {
+            if (!user) return;
+            const items = await getVaultItems(user.id);
+            setQuickAdds(mergeRemoteItemsWithOutbox(items));
+            setUserData(await getUserData(user.id));
+            setFolders(await getFolders(user.id));
+            setCoverLibrary(await getCoverLibrary(user.id));
+          }}
+        />
 
         {isMobile ? (
           <MobileTopBar

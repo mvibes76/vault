@@ -156,8 +156,7 @@ export default function QuickAddModal({ onAdd, onClose, folders = [], onCreateFo
       addedAt: initialItem?.addedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    onAdd(item);
-    onClose();
+    try { await onAdd(item); } catch {} finally { onClose(); }
   };
 
   return (
