@@ -907,6 +907,119 @@ const pdfBtn = { padding: "7px 11px", borderRadius: 999, background: "rgba(255,2
 
 const fullscreenStage = { width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#000" };
 
+const integratedPlayerSurface = {
+  position: "relative",
+  width: "fit-content",
+  maxWidth: "96vw",
+  maxHeight: "94dvh",
+  display: "flex",
+  flexDirection: "column",
+  background: "rgba(10,10,11,0.98)",
+  border: "1px solid rgba(255,255,255,0.10)",
+  borderRadius: 18,
+  overflow: "hidden",
+  boxShadow: "0 30px 100px rgba(0,0,0,0.62)",
+};
+
+const integratedPlayerHeader = {
+  minHeight: 66,
+  display: "flex",
+  alignItems: "center",
+  gap: 14,
+  padding: "9px 10px 9px 16px",
+  borderBottom: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(13,13,14,0.96)",
+};
+
+const integratedPlayerIdentity = {
+  minWidth: 0,
+  width: "min(32vw, 300px)",
+  flexShrink: 0,
+};
+
+const integratedPlayerTitle = {
+  color: "#f5f5f7",
+  fontSize: 13,
+  lineHeight: 1.25,
+  fontWeight: 680,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const integratedPlayerMeta = {
+  color: "rgba(235,235,245,0.58)",
+  fontSize: 10,
+  marginTop: 4,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const integratedControls = {
+  minWidth: 0,
+  flex: 1,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 6,
+  overflowX: "auto",
+  overflowY: "hidden",
+  paddingBottom: 1,
+  scrollbarWidth: "none",
+};
+
+const integratedStage = {
+  position: "relative",
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#050506",
+};
+
+const integratedCtrlBtn = {
+  background: "rgba(255,255,255,0.055)",
+  border: "1px solid rgba(255,255,255,0.085)",
+  color: "#f5f5f7",
+  cursor: "pointer",
+  borderRadius: 11,
+  width: 44,
+  height: 44,
+  minWidth: 44,
+  flexShrink: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  backdropFilter: "blur(12px)",
+};
+
+const integratedSelectBtn = {
+  height: 44,
+  flexShrink: 0,
+  background: "rgba(255,255,255,0.055)",
+  border: "1px solid rgba(255,255,255,0.085)",
+  color: "#f5f5f7",
+  borderRadius: 11,
+  padding: "0 10px",
+  fontSize: 11,
+};
+
+const integratedMarkToast = {
+  position: "absolute",
+  top: 74,
+  right: 12,
+  zIndex: 1002,
+  padding: "8px 11px",
+  borderRadius: 10,
+  background: "rgba(14,14,15,0.92)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  color: "#f5f5f7",
+  fontSize: 11,
+  boxShadow: "0 12px 36px rgba(0,0,0,0.42)",
+  backdropFilter: "blur(14px)",
+};
+
 const topControls = {
   position: "absolute", top: 16, left: 16, right: 16, zIndex: 1001,
   display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end",
