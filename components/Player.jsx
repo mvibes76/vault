@@ -430,7 +430,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   };
 
   // ── Mute (best-effort across embed types) ───────────────────────────────
-  const canMute = embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback);
+  const canMute = embed?.kind === "video" || embed?.kind === "audio" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback);
   const toggleMute = () => {
     setMuted((m) => {
       const next = !m;
@@ -481,7 +481,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   }, [onOil]);
 
   const openPopout = useCallback(() => {
-    const target = (embed?.kind === "video" || embed?.kind === "hls") ? (mediaSrc || embed.src) :
+    const target = (embed?.kind === "video" || embed?.kind === "audio" || embed?.kind === "hls") ? (mediaSrc || embed.src) :
       embed?.kind === "drive" && !driveFallback ? embed.src : item.url;
     try { window.open(target || item.url, "vaultPopout", "popup=yes,width=960,height=640,noopener,noreferrer"); }
     catch { window.open(target || item.url, "_blank", "noopener,noreferrer"); }
@@ -592,6 +592,30 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       );
     }
 
+    if (embed.kind === "audio") {
+      return (
+        <div style={audioShell}>
+          <div style={audioArtwork}>
+            <Icon name="volume" size={34} />
+          </div>
+          <div style={{ width: "100%" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.text1, marginBottom: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title || "Audio"}</div>
+            <audio
+              ref={videoRef}
+              src={embed.src}
+              controls
+              autoPlay
+              preload="metadata"
+              muted={muted}
+              onTimeUpdate={onTimeUpdate}
+              onLoadedMetadata={onLoadedMetadata}
+              style={{ width: "100%", display: "block" }}
+            />
+          </div>
+        </div>
+      );
+    }
+
     if (embed.kind === "hls") {
       return (
         <div style={mediaShell(isFullscreen, mediaOrientation)}>
@@ -659,7 +683,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     backdropTap.current = now;
   };
 
-  const timeBasedMedia = embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback);
+  const timeBasedMedia = embed?.kind === "video" || embed?.kind === "audio" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback);
   const actionBtn = integrated ? integratedCtrlBtn : ctrlBtn;
   const controlBar = (
     <>
@@ -914,6 +938,29 @@ const pdfControls = { position: "absolute", left: "50%", bottom: 10, transform: 
 const pdfBtn = { padding: "7px 11px", borderRadius: 999, background: "rgba(255,255,255,0.10)", border: "none", color: T.text1, cursor: "pointer", fontSize: 12, fontWeight: 700 };
 
 const fullscreenStage = { width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#000" };
+
+const audioShell = {
+  width: "min(90vw, 620px)",
+  minHeight: 230,
+  display: "grid",
+  gridTemplateColumns: "120px minmax(0,1fr)",
+  alignItems: "center",
+  gap: 22,
+  padding: 24,
+  background: "linear-gradient(145deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018))",
+  borderRadius: 16,
+};
+
+const audioArtwork = {
+  width: 120,
+  aspectRatio: "1 / 1",
+  borderRadius: 16,
+  display: "grid",
+  placeItems: "center",
+  background: "radial-gradient(circle at 35% 30%, rgba(255,255,255,0.13), rgba(255,255,255,0.025) 58%)",
+  border: "1px solid rgba(255,255,255,0.09)",
+  color: "rgba(255,255,255,0.7)",
+};
 
 const integratedPlayerSurface = {
   position: "relative",
