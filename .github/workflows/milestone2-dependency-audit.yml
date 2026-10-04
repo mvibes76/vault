@@ -23,6 +23,8 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Regenerate public npm lockfile
         run: npm install --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org
+      - name: Apply non-breaking npm audit fixes to lockfile
+        run: npm audit fix --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org || true
       - name: Audit dependencies
         id: audit
         shell: bash
