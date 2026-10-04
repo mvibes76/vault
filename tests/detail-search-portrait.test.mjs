@@ -39,7 +39,7 @@ test("player adapts direct media and Shorts to portrait layouts", () => {
   const source = read("components/Player.jsx");
   assert.match(source, /const \[mediaOrientation, setMediaOrientation\] = useState\("wide"\)/);
   assert.match(source, /ratio < 0\.86 \? "portrait"/);
-  assert.match(source, /youtube\.com\\\/shorts/);
+  assert.ok(source.includes('youtube\\.com\\/shorts\\//i.test'));
   assert.match(source, /mediaShell\(isFullscreen, mediaOrientation\)/);
   assert.match(source, /orientation === "portrait"/);
 });
