@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { safeFetch, validatePublicUrl } from "@/lib/server/safe-url";
+import { safeFetch, validatePublicUrl, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ const MAX_HTML_BYTES = 1_000_000;
 export async function GET(request) {
   const target = new URL(request.url).searchParams.get("url");
   if (!target) return NextResponse.json({ error: "Missing url" }, { status: 400 });
+  try { await guardProxyRequest(request, "discovery"); }
+  catch (error) { return securityErrorResponse(error, "Metadata unavailable"); }
 
   const checked = await validatePublicUrl(target);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
@@ -22,7 +25,7 @@ export async function GET(request) {
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": checked.url.origin + "/",
       },
-      signal: AbortSignal.timeout(8000),
+      timeoutMs: 8000,
     });
 
     const contentType = res.headers.get("content-type") || "";
@@ -35,20 +38,23 @@ export async function GET(request) {
     if (contentType.startsWith("image/") && !contentType.includes("svg")) {
       const path = new URL(finalUrl).pathname;
       const name = decodeURIComponent(path.split("/").pop() || "Image");
+      try { await res.body?.cancel(); } catch {}
       return NextResponse.json({ url: finalUrl, title: name, type: "image", thumbnail: finalUrl, description: "", siteName: new URL(finalUrl).hostname, contentType }, { headers: { "Cache-Control": "no-store" } });
     }
 
     if (/^(video|application\/(x-mpegurl|vnd\.apple\.mpegurl))/i.test(contentType)) {
       const path = new URL(finalUrl).pathname;
       const name = decodeURIComponent(path.split("/").pop() || "Video");
+      try { await res.body?.cancel(); } catch {}
       return NextResponse.json({ url: finalUrl, title: name, type: "video", thumbnail: "", description: "", siteName: new URL(finalUrl).hostname, contentType }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    if (!contentType.includes("html") && !contentType.includes("xml")) {
-      return NextResponse.json({ url: finalUrl, title: new URL(finalUrl).hostname, type: "link", thumbnail: "", description: "", siteName: new URL(finalUrl).hostname, contentType }, { headers: { "Cache-Control": "no-store" } });
+    if (contentType && !contentType.includes("html") && !contentType.includes("xml")) {
+      try { await res.body?.cancel(); } catch {}
+      return NextResponse.json({ error: "Preview content type is not supported" }, { status: 415, headers: { "Cache-Control": "no-store" } });
     }
 
-    const html = await readLimitedText(res, MAX_HTML_BYTES);
+    const html = await readTextLimited(res, MAX_HTML_BYTES);
     const meta = {
       url: finalUrl,
       title: first([metaContent(html, "property", "og:title"), metaContent(html, "name", "twitter:title"), titleTag(html), checked.url.hostname]),
@@ -61,31 +67,8 @@ export async function GET(request) {
 
     return NextResponse.json(meta, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
-    return NextResponse.json({ error: e.message || "Metadata fetch failed" }, { status: e.status || 502 });
+    return securityErrorResponse(e, "Metadata unavailable");
   }
-}
-
-async function readLimitedText(response, limit) {
-  const reader = response.body?.getReader();
-  if (!reader) return response.text();
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) break;
-    chunks.push(value);
-  }
-  return new TextDecoder().decode(concat(chunks));
-}
-
-function concat(chunks) {
-  const total = chunks.reduce((sum, c) => sum + c.byteLength, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
-  return out;
 }
 
 function first(values) { return values.find((v) => typeof v === "string" && v.trim())?.trim() || ""; }
