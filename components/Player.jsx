@@ -1255,6 +1255,7 @@ function ImageViewer({ src, alt, contained = false }) {
 
   // Touch: pinch zoom + one-finger pan + double-tap reset
   const onTouchStart = (e) => {
+    e.stopPropagation();
     if (e.touches.length === 2) {
       const [a, b] = e.touches;
       pinchState.current = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), scale };
@@ -1267,6 +1268,7 @@ function ImageViewer({ src, alt, contained = false }) {
     }
   };
   const onTouchMove = (e) => {
+    e.stopPropagation();
     if (e.touches.length === 2 && pinchState.current) {
       e.preventDefault();
       const [a, b] = e.touches;
@@ -1280,7 +1282,7 @@ function ImageViewer({ src, alt, contained = false }) {
       });
     }
   };
-  const onTouchEnd = () => { pinchState.current = null; dragState.current = null; };
+  const onTouchEnd = (e) => { e?.stopPropagation?.(); pinchState.current = null; dragState.current = null; };
 
   // Mouse drag pan
   const onMouseDown = (e) => {
