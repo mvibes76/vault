@@ -125,11 +125,29 @@ function FilterFields({ filters, setFilters, folders }) {
 }
 
 function MobileControlSheet({ kind, filters, setFilters, sort, setSort, folders, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!kind || !ref.current) return;
+    const root = ref.current;
+    const before = document.activeElement;
+    root.querySelector("select,button")?.focus();
+    const handler = (event) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (event.key !== "Tab") return;
+      const nodes = [...root.querySelectorAll('button:not([disabled]),select:not([disabled]),input:not([disabled]),textarea:not([disabled]),[href]')];
+      if (!nodes.length) return;
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handler);
+    return () => { document.removeEventListener("keydown", handler); before?.focus?.(); };
+  }, [kind, onClose]);
   if (!kind) return null;
   return (
     <>
       <div className="v2-backdrop" onMouseDown={onClose} aria-hidden="true"/>
-      <section className="v2-sheet" role="dialog" aria-modal="true" aria-label={kind==="sort"?"Sort library":"Filter library"}>
+      <section ref={ref} className="v2-sheet" role="dialog" aria-modal="true" aria-label={kind==="sort"?"Sort library":"Filter library"}>
         <div className="v2-sheet-head">
           <div className="v2-modal-title">{kind==="sort"?"Sort":"Filters"}</div>
           <button type="button" className="v2-iconbtn" onClick={onClose} aria-label="Close"><Icon name="x" size={18}/></button>
@@ -160,6 +178,7 @@ export default function VaultV2({ route = "home" }) {
   const [loadError, setLoadError] = useState("");
   const [online, setOnline] = useState(true);
   const [query, setQuery] = useState(searchParams.get("q") || "");
+  const [debouncedQuery, setDebouncedQuery] = useState(searchParams.get("q") || "");
   const [filters, setFilters] = useState({ type:"all", collection:"all", source:"all", favorite:"all", rating:"all", status:"all" });
   const [sort, setSort] = useState("added");
   const [detailItem, setDetailItem] = useState(null);
@@ -170,6 +189,7 @@ export default function VaultV2({ route = "home" }) {
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const [collectionBusy, setCollectionBusy] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(60);
 
   const selectedCollection = searchParams.get("folder") || "";
 
@@ -212,6 +232,15 @@ export default function VaultV2({ route = "home" }) {
   useEffect(() => {
     setQuery(searchParams.get("q") || "");
   }, [searchParams]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    setVisibleLimit(60);
+  }, [route, debouncedQuery, filters, sort, selectedCollection]);
 
   useEffect(() => {
     const sync = () => setOnline(navigator.onLine);
@@ -289,7 +318,7 @@ export default function VaultV2({ route = "home" }) {
   const allFiltered = useMemo(() => {
     let result = items.filter((item)=>{
       const state=userData[item.key]||{};
-      if(!matchesQuery(item,state,query)) return false;
+      if(!matchesQuery(item,state,debouncedQuery)) return false;
       if(filters.type!=="all" && mediaType(item)!==filters.type) return false;
       const folder=folderFor(item,state);
       if(filters.collection==="inbox" && folder) return false;
@@ -313,7 +342,7 @@ export default function VaultV2({ route = "home" }) {
       return new Date(b.addedAt||0)-new Date(a.addedAt||0);
     });
     return result;
-  },[items,userData,query,filters,sort]);
+  },[items,userData,debouncedQuery,filters,sort]);
 
   const inboxItems = useMemo(()=>items.filter((i)=>!folderFor(i,userData[i.key]||{})),[items,userData]);
   const continueItems = useMemo(()=>items.filter((i)=>{const d=userData[i.key]||{};return d.progress>5&&d.duration>0&&d.progress/d.duration<.95}).sort((a,b)=>new Date(userData[b.key]?.updated_at||0)-new Date(userData[a.key]?.updated_at||0)).slice(0,8),[items,userData]);
@@ -333,7 +362,11 @@ export default function VaultV2({ route = "home" }) {
   const renderGrid=(list,emptyTitle="Nothing here yet",emptyText="Items matching this view will appear here.")=>{
     if(loading) return <LoadingGrid/>;
     if(!list.length) return <EmptyState title={emptyTitle} text={emptyText} action={()=>setAddOpen(true)} actionLabel="Add media"/>;
-    return <div className="v2-grid">{list.map((item)=><MediaCard key={item.key} item={item} state={userData[item.key]||{}} onOpen={setDetailItem}/>)}</div>;
+    const visible = list.slice(0, visibleLimit);
+    return <>
+      <div className="v2-grid">{visible.map((item)=><MediaCard key={item.key} item={item} state={userData[item.key]||{}} onOpen={setDetailItem}/>)}</div>
+      {visibleLimit < list.length ? <div style={{display:"flex",justifyContent:"center",marginTop:28}}><button type="button" className="v2-btn" onClick={()=>setVisibleLimit((n)=>n+60)}>Load 60 more</button></div> : null}
+    </>;
   };
 
   const filtersBar=(
