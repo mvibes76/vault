@@ -5,6 +5,7 @@ on:
     branches: [milestone2-security-gate]
     paths:
       - package.json
+      - .github/workflows/milestone2-dependency-audit.yml
 
 permissions:
   contents: write
@@ -32,6 +33,18 @@ jobs:
           const audit = JSON.parse(fs.readFileSync('audit.json','utf8'));
           const v = audit.metadata?.vulnerabilities || {};
           console.log('AUDIT_SUMMARY ' + JSON.stringify(v));
+          for (const [name, info] of Object.entries(audit.vulnerabilities || {})) {
+            console.log('AUDIT_ITEM ' + JSON.stringify({
+              name,
+              severity: info.severity,
+              isDirect: info.isDirect,
+              range: info.range,
+              nodes: info.nodes,
+              via: (info.via || []).map(v => typeof v === 'string' ? v : ({
+                source: v.source, name: v.name, severity: v.severity, title: v.title, range: v.range, url: v.url
+              }))
+            }));
+          }
           const blocking = Number(v.high || 0) + Number(v.critical || 0);
           if (blocking > 0) {
             console.error('Blocking high/critical vulnerabilities remain:', blocking);
