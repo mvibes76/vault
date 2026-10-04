@@ -1,13 +1,2 @@
-import Vault from "@/components/Vault";
-import AuthGate from "@/components/AuthGate";
-import ErrorBoundary from "@/components/ErrorBoundary";
-
-export default function Page() {
-  return (
-    <ErrorBoundary>
-      <AuthGate>
-        <Vault />
-      </AuthGate>
-    </ErrorBoundary>
-  );
-}
+import VaultExperience from "@/components/VaultExperience";
+export default function Page(){ return <VaultExperience route="home" />; }
