@@ -81,6 +81,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     setRelayReason("");
     setPlaybackIssue("");
     setQualityLevels([]);
+    setMediaOrientation(/youtube\.com\/shorts\//i.test(item.url || "") ? "portrait" : "wide");
     setQuality("auto");
     hlsRecoverCount.current = 0;
     setMarkNotice("");
@@ -159,8 +160,13 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   // After a refresh, when the new <video> mounts, seek back to where we left off.
   // Triggered by onLoadedMetadata in the video element below.
   const onLoadedMetadata = () => {
-    if (seekTarget.current > 2 && videoRef.current) {
-      videoRef.current.currentTime = seekTarget.current;
+    const video = videoRef.current;
+    if (video?.videoWidth && video?.videoHeight) {
+      const ratio = video.videoWidth / video.videoHeight;
+      setMediaOrientation(ratio < 0.86 ? "portrait" : ratio < 1.12 ? "square" : "wide");
+    }
+    if (seekTarget.current > 2 && video) {
+      video.currentTime = seekTarget.current;
       seekTarget.current = 0;
     }
   };
@@ -239,6 +245,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const touch    = useRef({ x: null, y: null });
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [mediaOrientation, setMediaOrientation] = useState("wide");
 
   // Track native fullscreen state so the button reflects reality
   useEffect(() => {
@@ -521,8 +528,9 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     }
 
     if (embed.kind === "youtube-api") {
+      const ytWrap = /youtube\.com\/shorts\//i.test(item.url || "") ? stagePortrait : stageWide;
       return (
-        <div style={stageWide}>
+        <div style={ytWrap}>
           <div ref={ytSlot} style={frameInner} />
         </div>
       );
@@ -564,7 +572,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
     if (embed.kind === "video") {
       return (
-        <div style={mediaShell(isFullscreen)}>
+        <div style={mediaShell(isFullscreen, mediaOrientation)}>
           <video
             ref={videoRef}
             src={mediaSrc}
@@ -586,7 +594,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
     if (embed.kind === "hls") {
       return (
-        <div style={mediaShell(isFullscreen)}>
+        <div style={mediaShell(isFullscreen, mediaOrientation)}>
           <video
             ref={videoRef}
             poster={item.display_thumbnail ? proxiedMediaUrl(item.display_thumbnail) : (item.thumbnail ? proxiedMediaUrl(item.thumbnail) : undefined)}
@@ -616,7 +624,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         );
       }
       return (
-        <div style={mediaShell(isFullscreen)}>
+        <div style={mediaShell(isFullscreen, mediaOrientation)}>
           <video
             ref={videoRef}
             src={embed.src}
@@ -1034,15 +1042,39 @@ const markToast = {
   boxShadow: "0 12px 40px rgba(0,0,0,0.45)", backdropFilter: "blur(12px)",
 };
 
-const mediaShell = (fullscreen) => ({
-  position: "relative",
-  width: fullscreen ? "100vw" : "min(94vw, 1280px)",
-  height: fullscreen ? "100vh" : "min(86vh, calc(94vw * 9 / 16))",
-  maxHeight: fullscreen ? "100vh" : "86vh",
-  background: "#000",
-  borderRadius: fullscreen ? 0 : 8,
-  overflow: "hidden",
-});
+const mediaShell = (fullscreen, orientation = "wide") => {
+  if (fullscreen) return {
+    position: "relative", width: "100vw", height: "100vh", maxHeight: "100vh",
+    background: "#000", borderRadius: 0, overflow: "hidden",
+  };
+  if (orientation === "portrait") return {
+    position: "relative",
+    width: "min(88vw, 520px)",
+    height: "min(78dvh, 900px)",
+    maxHeight: "78dvh",
+    background: "#000",
+    borderRadius: 10,
+    overflow: "hidden",
+  };
+  if (orientation === "square") return {
+    position: "relative",
+    width: "min(90vw, 760px)",
+    height: "min(76dvh, 760px)",
+    maxHeight: "76dvh",
+    background: "#000",
+    borderRadius: 10,
+    overflow: "hidden",
+  };
+  return {
+    position: "relative",
+    width: "min(94vw, 1280px)",
+    height: "min(78dvh, calc(94vw * 9 / 16))",
+    maxHeight: "78dvh",
+    background: "#000",
+    borderRadius: 10,
+    overflow: "hidden",
+  };
+};
 
 const stageWide = {
   width: "min(94vw, 1280px)",
