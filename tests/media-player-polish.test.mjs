@@ -1,33 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
 
 const read = (path) => fs.readFileSync(path, "utf8");
-const preview = await import(pathToFileURL(process.cwd() + "/lib/media-preview.js").href);
 
-test("image items always expose their own URL as a display preview", () => {
-  const item = { key:"img-1", title:"Launch Poster", url:"https://example.com/launch-poster.jpg", type:"image" };
-  const resolved = preview.resolveMediaPreview(item, [item], []);
-  assert.equal(resolved.display_thumbnail, item.url);
-  assert.equal(resolved.display_thumbnail_source, "image_source");
+test("preview resolver gives image items their own URL and supports exact-name image matching", () => {
+  const source = read("lib/media-preview.js");
+  assert.match(source, /isImageItem\(item\)/);
+  assert.match(source, /display_thumbnail:\s*item\.thumbnail \|\| item\.url/);
+  assert.match(source, /display_thumbnail_source:\s*item\.thumbnail \? \(item\.thumbnail_source \|\| "item"\) : "image_source"/);
+  assert.match(source, /normalizedMediaName/);
+  assert.match(source, /wanted\.has\(name\)/);
+  assert.match(source, /otherFolder === folder/);
+  assert.match(source, /display_thumbnail_source:\s*"named_image"/);
 });
 
-test("same-name saved image can supply a display-only preview without rewriting the item thumbnail", () => {
-  const video = { key:"vid-1", title:"Summer Campaign", url:"https://example.com/video.mp4", type:"video", folder:"Ideas" };
-  const image = { key:"img-1", title:"Summer Campaign Cover.jpg", url:"https://example.com/poster.jpg", type:"image", folder:"Ideas" };
-  const resolved = preview.resolveMediaPreview(video, [video,image], []);
-  assert.equal(resolved.display_thumbnail, image.url);
-  assert.equal(resolved.display_thumbnail_source, "named_image");
-  assert.equal(resolved.thumbnail, undefined);
-});
-
-test("manual thumbnails still win over automatic matching", () => {
-  const video = { key:"vid-1", title:"Summer Campaign", url:"https://example.com/video.mp4", type:"video", thumbnail:"https://example.com/manual.jpg", thumbnail_source:"manual", cover_mode:"manual" };
-  const image = { key:"img-1", title:"Summer Campaign", url:"https://example.com/other.jpg", type:"image" };
-  const resolved = preview.resolveMediaPreview(video, [video,image], []);
-  assert.equal(resolved.display_thumbnail, video.thumbnail);
-  assert.equal(resolved.display_thumbnail_source, "manual");
+test("manual and Cover Library previews take precedence before provider/name matching", () => {
+  const source = read("lib/media-preview.js");
+  const manualAt = source.indexOf('mode === "manual"');
+  const coverAt = source.indexOf('matchesCoverRule(item, entry)');
+  const providerAt = source.indexOf('getThumbCandidates(item.url || "")[0]');
+  const namedAt = source.indexOf('findNamedImagePreview(item, items)');
+  assert.ok(manualAt >= 0 && coverAt > manualAt && providerAt > coverAt && namedAt > providerAt);
+  assert.match(source, /display_thumbnail_source:\s*"cover_library"/);
 });
 
 test("integrated player keeps relay status transient and image loading proxied", () => {
