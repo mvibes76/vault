@@ -68,7 +68,7 @@
 .v2-progress>span{height:100%;display:block;background:#e9e9eb}
 .v2-favbadge{position:absolute;top:10px;right:10px;width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:rgba(5,5,5,.72);backdrop-filter:blur(12px);color:#fff;border:1px solid rgba(255,255,255,.12)}
 .v2-toolbar{display:flex;align-items:center;gap:10px;margin:18px 0 24px;flex-wrap:wrap}
-.v2-filter{height:42px;border:1px solid var(--v2-border);border-radius:11px;background:#111;color:var(--v2-text);padding:0 34px 0 12px;font-size:12px;outline:0}
+.v2-filter{height:44px;border:1px solid var(--v2-border);border-radius:11px;background:#111;color:var(--v2-text);padding:0 34px 0 12px;font-size:12px;outline:0}
 .v2-filter:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .v2-result-count{margin-left:auto;color:var(--v2-subtle);font-size:12px}
 .v2-empty{min-height:300px;border:1px dashed rgba(255,255,255,.13);border-radius:18px;display:grid;place-items:center;text-align:center;padding:36px;background:rgba(255,255,255,.018)}
@@ -149,6 +149,7 @@
   .v2-collection-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:899px){
+  .v2-desktop-add{display:none}
   .v2-shell{display:block}
   .v2-sidebar{display:none}
   .v2-main{padding-bottom:96px}
