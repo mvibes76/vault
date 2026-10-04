@@ -69,3 +69,21 @@ test("mobile form controls stay at 16px to prevent iOS focus zoom", () => {
   const css = read("app/vault-v2.css");
   assert.match(css, /@media \(max-width:899px\)\{[\s\S]*input,select,textarea\{font-size:16px!important\}/);
 });
+
+
+test("web search always has machine-readable and graceful fallbacks", () => {
+  const route = read("app/api/browser-search/route.js");
+  assert.match(route, /bing-rss/);
+  assert.match(route, /wikipedia-opensearch/);
+  assert.match(route, /Search Google for/);
+  assert.match(route, /Web providers are temporarily unavailable/);
+  assert.doesNotMatch(route, /return NextResponse\.json\([\s\S]*Search provider temporarily unavailable/);
+});
+
+test("mobile in-app browser collapses quick save while keyboard is open", () => {
+  const source = read("components/InAppBrowser.jsx");
+  assert.match(source, /visualViewport/);
+  assert.match(source, /setKeyboardOpen/);
+  assert.match(source, /keyboardOpen && isMobile \? "none" : "block"/);
+  assert.match(source, /fontSize: 16/);
+});
