@@ -14,12 +14,13 @@ function pct(data) {
 export default function MediaCard({ item, state = {}, onOpen }) {
   const source = getSourceMeta(item.url || "");
   const candidates = useMemo(() => {
-    const list = [item.thumbnail, ...getThumbCandidates(item.url || "")].filter(Boolean);
+    const list = [item.display_thumbnail, item.thumbnail, ...getThumbCandidates(item.url || "")].filter(Boolean);
     return [...new Set(list)];
-  }, [item.thumbnail, item.url]);
+  }, [item.display_thumbnail, item.thumbnail, item.url]);
   const [index, setIndex] = useState(0);
   const thumb = candidates[index] ? proxiedMediaUrl(candidates[index]) : "";
   const progress = pct(state);
+  const isImage = source.id === "image" || String(item.type || "").toLowerCase().includes("image");
 
   return (
     <article className="v2-card">
@@ -30,7 +31,7 @@ export default function MediaCard({ item, state = {}, onOpen }) {
         aria-label={`Open ${item.title || "media"}`}
       >
         <div className="v2-art">
-          <div className="v2-art-fallback"><Icon name={item.type === "image" ? "grid" : "play"} size={28} /></div>
+          <div className="v2-art-fallback"><Icon name={isImage ? "grid" : "play"} size={28} /></div>
           {thumb ? (
             <img
               src={thumb}
@@ -41,7 +42,7 @@ export default function MediaCard({ item, state = {}, onOpen }) {
             />
           ) : null}
           <div className="v2-art-shade" />
-          <div className="v2-playbubble"><Icon name="play" size={17} filled /></div>
+          <div className="v2-playbubble"><Icon name={isImage ? "zoomIn" : "play"} size={17} filled={!isImage} /></div>
           {state.favorite ? <div className="v2-favbadge" aria-label="Favorite"><Icon name="star" size={15} filled /></div> : null}
           <SyncBadge entityKey={item.key} style={{ left: 10, right: "auto", top: 10, bottom: "auto" }} />
         </div>
