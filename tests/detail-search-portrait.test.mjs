@@ -54,7 +54,16 @@ test("Search exposes the protected external browser flow", () => {
   assert.match(browser, /\/api\/browser-search\?q=/);
   assert.match(browser, /initialQuery = ""/);
   assert.match(route, /guardProxyRequest\(req, "search"\)/);
-  assert.match(route, /safeFetch\(DDG_HTML/);
-  assert.match(route, /body:\s*body\.toString\(\)/);
+  assert.match(route, /searchProvider\(attempt\.url, q, attempt\.parser\)/);
+  assert.match(route, /duckduckgo-html/);
+  assert.match(route, /duckduckgo-lite/);
+  assert.match(route, /method:\s*"GET"/);
+  assert.doesNotMatch(route, /method:\s*"POST"/);
   assert.doesNotMatch(route, /fetch\(DDG_HTML/);
+});
+
+
+test("mobile form controls stay at 16px to prevent iOS focus zoom", () => {
+  const css = read("app/vault-v2.css");
+  assert.match(css, /@media \(max-width:899px\)\{[\s\S]*input,select,textarea\{font-size:16px!important\}/);
 });
