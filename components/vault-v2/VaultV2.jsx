@@ -169,6 +169,7 @@ export default function VaultV2({ route = "home" }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const searchRef = useRef(null);
+  const newCollectionRef = useRef(null);
 
   const [user, setUser] = useState(null);
   const [items, setItems] = useState([]);
@@ -258,6 +259,24 @@ export default function VaultV2({ route = "home" }) {
     window.addEventListener("keydown",handler);
     return () => window.removeEventListener("keydown",handler);
   }, []);
+
+  useEffect(() => {
+    if (!newCollectionOpen || !newCollectionRef.current) return;
+    const root = newCollectionRef.current;
+    const before = document.activeElement;
+    root.querySelector("input,button")?.focus();
+    const handler = (event) => {
+      if (event.key === "Escape") { event.preventDefault(); setNewCollectionOpen(false); return; }
+      if (event.key !== "Tab") return;
+      const nodes = [...root.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[href]')];
+      if (!nodes.length) return;
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handler);
+    return () => { document.removeEventListener("keydown", handler); before?.focus?.(); };
+  }, [newCollectionOpen]);
 
   const saveItem = async (item) => {
     setItems((prev)=>[item,...prev.filter((x)=>x.key!==item.key && x.key!==item.previousKey)]);
@@ -457,7 +476,7 @@ export default function VaultV2({ route = "home" }) {
 
       {newCollectionOpen ? <>
         <div className="v2-backdrop" onMouseDown={()=>setNewCollectionOpen(false)} aria-hidden="true"/>
-        <section className="v2-sheet" role="dialog" aria-modal="true" aria-labelledby="v2-new-collection-title" style={{maxWidth:460}}>
+        <section ref={newCollectionRef} className="v2-sheet" role="dialog" aria-modal="true" aria-labelledby="v2-new-collection-title" style={{maxWidth:460}}>
           <div className="v2-sheet-head"><div className="v2-modal-title" id="v2-new-collection-title">New Collection</div><button className="v2-iconbtn" onClick={()=>setNewCollectionOpen(false)} aria-label="Close"><Icon name="x" size={18}/></button></div>
           <div className="v2-sheet-body"><div className="v2-field"><label htmlFor="v2-collection-name">Name</label><input id="v2-collection-name" autoFocus className="v2-input" value={newCollectionName} onChange={(e)=>setNewCollectionName(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")document.getElementById("v2-create-collection")?.click()}} placeholder="Ideas, Lighting, Family…"/></div></div>
           <div className="v2-sheet-foot"><button className="v2-btn" onClick={()=>setNewCollectionOpen(false)}>Cancel</button><button id="v2-create-collection" className="v2-btn v2-btn-primary" disabled={!newCollectionName.trim()||collectionBusy} onClick={async()=>{setCollectionBusy(true);try{await createCollection(newCollectionName);setNewCollectionName("");setNewCollectionOpen(false)}finally{setCollectionBusy(false)}}}>{collectionBusy?"Creating…":"Create"}</button></div>
