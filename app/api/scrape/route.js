@@ -1,17 +1,26 @@
 import { NextResponse } from "next/server";
+import { safeFetch, validatePublicUrl, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
 
 const cache = new Map();
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+const MAX_HTML_BYTES = 1_000_000;
+const MAX_JSON_BYTES = 1_000_000;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const url = searchParams.get("url");
 
-  if (!url || !url.startsWith("http")) {
-    return NextResponse.json({ error: "Invalid url" }, { status: 400 });
-  }
+  if (!url) return NextResponse.json({ error: "Invalid url" }, { status: 400 });
+  try { await guardProxyRequest(request, "discovery"); }
+  catch (error) { return securityErrorResponse(error, "Preview unavailable"); }
 
-  const cached = cache.get(url);
+  const checked = await validatePublicUrl(url);
+  if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: checked.status });
+  const parsed = checked.url;
+  const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+
+  const cached = cache.get(parsed.href);
   if (cached && Date.now() - cached.at < CACHE_TTL) {
     return NextResponse.json(cached.data);
   }
@@ -20,11 +29,11 @@ export async function GET(request) {
     const result = { title: null, image: null, images: null, video: null, description: null, embed: null };
 
     // ── Reddit ──────────────────────────────────────────────────────────────
-    if (url.includes("reddit.com")) {
-      const jsonUrl = url.replace(/\/?$/, "") + ".json";
-      const r = await fetch(jsonUrl, { headers: { "User-Agent": "MediaVault/1.0" } });
+    if (host === "reddit.com" || host.endsWith(".reddit.com")) {
+      const jsonUrl = parsed.href.replace(/\/?$/, "") + ".json";
+      const r = await safeFetch(jsonUrl, { headers: { "User-Agent": "MediaVault/1.0" }, timeoutMs: 8000, maxBytes: MAX_JSON_BYTES });
       if (r.ok) {
-        const j = await r.json();
+        const j = JSON.parse(await readTextLimited(r, MAX_JSON_BYTES));
         const post = j?.[0]?.data?.children?.[0]?.data;
         if (post) {
           result.title = post.title;
@@ -42,32 +51,32 @@ export async function GET(request) {
               .filter(Boolean);
           }
         }
-        cache.set(url, { at: Date.now(), data: result });
+        cache.set(parsed.href, { at: Date.now(), data: result });
         return NextResponse.json(result);
       }
     }
 
     // ── Instagram ────────────────────────────────────────────────────────────
     // Server-side scraping is blocked by Instagram. Use their public embed endpoint.
-    if (url.includes("instagram.com")) {
-      const sc = url.match(/instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/)?.[1];
+    if (host === "instagram.com" || host.endsWith(".instagram.com")) {
+      const sc = parsed.href.match(/instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/)?.[1];
       if (sc) {
         result.embed = `https://www.instagram.com/p/${sc}/embed/`;
         result.title = "Instagram Post";
       }
-      cache.set(url, { at: Date.now(), data: result });
+      cache.set(parsed.href, { at: Date.now(), data: result });
       return NextResponse.json(result);
     }
 
     // ── TikTok ───────────────────────────────────────────────────────────────
-    if (url.includes("tiktok.com")) {
+    if (host === "tiktok.com" || host.endsWith(".tiktok.com")) {
       try {
-        const oe = await fetch(
-          `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`,
-          { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(5000) }
+        const oe = await safeFetch(
+          `https://www.tiktok.com/oembed?url=${encodeURIComponent(parsed.href)}`,
+          { headers: { "User-Agent": "Mozilla/5.0" }, timeoutMs: 5000, maxBytes: MAX_JSON_BYTES }
         );
         if (oe.ok) {
-          const d = await oe.json();
+          const d = JSON.parse(await readTextLimited(oe, MAX_JSON_BYTES));
           result.title       = d.title || null;
           result.image       = d.thumbnail_url || null;
           result.description = d.author_name ? `@${d.author_name}` : null;
@@ -77,22 +86,22 @@ export async function GET(request) {
           }
         }
       } catch {}
-      cache.set(url, { at: Date.now(), data: result });
+      cache.set(parsed.href, { at: Date.now(), data: result });
       return NextResponse.json(result);
     }
 
     // ── Generic OG scraping ──────────────────────────────────────────────────
-    const res = await fetch(url, {
+    const res = await safeFetch(parsed.href, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml",
       },
-      redirect: "follow",
-      signal: AbortSignal.timeout(8000),
+      timeoutMs: 8000,
+      maxBytes: MAX_HTML_BYTES,
     });
 
     if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-    const html = (await res.text()).slice(0, 300000);
+    const html = (await readTextLimited(res, MAX_HTML_BYTES)).slice(0, 300000);
 
     const meta = (prop) => {
       const patterns = [
@@ -148,18 +157,18 @@ export async function GET(request) {
     if (allImages.length >= 3 && !result.video) result.images = allImages.slice(0, 40);
 
     // Resolve relative URLs
-    const base = new URL(url);
+    const base = new URL(res.url || parsed.href);
     const abs = (u) => { if (!u) return null; try { return new URL(u, base).href; } catch { return u; } };
     result.image  = abs(result.image);
     result.video  = abs(result.video);
     result.images = result.images?.map(abs).filter(Boolean) || null;
 
-    cache.set(url, { at: Date.now(), data: result });
+    cache.set(parsed.href, { at: Date.now(), data: result });
     return NextResponse.json(result);
 
   } catch (err) {
-    const fallback = { title: null, image: null, images: null, video: null, embed: null, error: err.message };
-    cache.set(url, { at: Date.now(), data: fallback });
+    const fallback = { title: null, image: null, images: null, video: null, embed: null, error: "Preview unavailable" };
+    cache.set(parsed.href, { at: Date.now(), data: fallback });
     return NextResponse.json(fallback);
   }
 }
