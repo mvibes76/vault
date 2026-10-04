@@ -86,12 +86,20 @@
 @keyframes v2-shimmer{to{background-position:-200% 0}}
 .v2-error{padding:14px 16px;border-radius:13px;border:1px solid rgba(255,116,116,.24);background:rgba(255,116,116,.07);color:#ffb2b2;font-size:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
 .v2-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.58);backdrop-filter:blur(7px);z-index:79}
-.v2-drawer{position:fixed;right:0;top:0;bottom:0;width:min(420px,94vw);z-index:80;background:#0d0d0e;border-left:1px solid var(--v2-border-strong);box-shadow:-28px 0 80px rgba(0,0,0,.48);display:flex;flex-direction:column;animation:v2-slidein .2s ease-out}
+.v2-drawer{position:fixed;right:0;top:0;bottom:0;width:min(520px,96vw);z-index:80;background:#0d0d0e;border-left:1px solid var(--v2-border-strong);box-shadow:-28px 0 80px rgba(0,0,0,.48);display:flex;flex-direction:column;animation:v2-slidein .2s ease-out}
 @keyframes v2-slidein{from{transform:translateX(18px);opacity:.55}}
-.v2-drawer-head{display:flex;align-items:center;justify-content:space-between;min-height:66px;padding:0 18px;border-bottom:1px solid var(--v2-border)}
-.v2-drawer-scroll{overflow:auto;padding:18px 18px 34px}
+.v2-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:66px;padding:0 14px;border-bottom:1px solid var(--v2-border)}
+.v2-drawer-scroll{overflow:auto;padding:16px 16px 34px}
 .v2-detail-art{aspect-ratio:16/9;border-radius:15px;overflow:hidden;background:#181818;border:1px solid var(--v2-border);margin-bottom:18px}
 .v2-detail-art img{width:100%;height:100%;object-fit:cover;display:block}
+.v2-detail-preview-fallback{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:var(--v2-subtle);font-size:12px}
+.v2-detail-pager,.v2-detail-head-actions{display:flex;align-items:center;gap:8px}
+.v2-detail-pager .v2-iconbtn:disabled{opacity:.28;cursor:not-allowed}
+.v2-iconbtn-danger{color:#ff9a9a;background:rgba(255,116,116,.06);border-color:rgba(255,116,116,.16)}
+.v2-delete-confirm{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid rgba(255,116,116,.20);background:rgba(255,116,116,.06);border-radius:12px;margin:0 0 18px;color:#ffc0c0;font-size:12px}
+.v2-delete-confirm>div{display:flex;gap:8px;flex-shrink:0}
+.v2-web-search-card{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;margin:0 0 18px;border:1px solid var(--v2-border);border-radius:16px;background:linear-gradient(145deg,rgba(255,255,255,.045),rgba(255,255,255,.018))}
+
 .v2-detail-title{font-size:23px;line-height:1.15;letter-spacing:-.6px;margin:0;font-weight:720}
 .v2-detail-source{font-size:12px;color:var(--v2-subtle);margin-top:7px}
 .v2-action-row{display:grid;grid-template-columns:1.4fr .8fr;gap:10px;margin:18px 0}
@@ -166,9 +174,16 @@
   .v2-mobile-controls{display:flex;gap:8px;margin:16px 0 22px}
   .v2-mobile-controls .v2-btn{flex:1}
   .v2-settings-grid{grid-template-columns:1fr}
-  .v2-drawer{width:100%;top:7dvh;border-left:0;border-top:1px solid var(--v2-border-strong);border-radius:20px 20px 0 0;animation:v2-sheetup .2s ease-out}
+  .v2-drawer{width:100%;top:2dvh;border-left:0;border-top:1px solid var(--v2-border-strong);border-radius:22px 22px 0 0;animation:v2-sheetup .2s ease-out}
   @keyframes v2-sheetup{from{transform:translateY(18px);opacity:.6}}
-  .v2-drawer-head{min-height:60px}
+  .v2-drawer-head{min-height:62px;padding-inline:10px}
+  .v2-drawer-scroll{padding:14px 12px 36px}
+  .v2-detail-art{border-radius:16px;margin-bottom:16px}
+  .v2-web-search-card{align-items:flex-start;flex-direction:column}
+  .v2-web-search-card .v2-btn{width:100%}
+  .v2-delete-confirm{align-items:stretch;flex-direction:column}
+  .v2-delete-confirm>div{width:100%}
+  .v2-delete-confirm .v2-btn{flex:1}
   .v2-sheet{left:0;right:0;bottom:0;top:auto;transform:none;width:100%;max-height:92dvh;border-radius:20px 20px 0 0;border-left:0;border-right:0;border-bottom:0}
   .v2-playbubble{opacity:1;transform:none;width:36px;height:36px}
 }
