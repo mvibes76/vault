@@ -94,8 +94,8 @@ export default function DetailDrawer({
           <button data-close type="button" className="v2-iconbtn" onClick={onClose} aria-label="Close item detail"><Icon name="x" size={18}/></button>
         </div>
         <div className="v2-drawer-scroll">
-          <div className="v2-detail-art">
-            {thumb ? <img src={proxiedMediaUrl(thumb)} alt={item.title ? `${item.title} cover` : ""} loading="lazy" /> : null}
+          <div className="v2-detail-art" style={isImage ? { aspectRatio:"4 / 5", maxHeight:420, marginInline:"auto", background:"#080809" } : undefined}>
+            {thumb ? <img src={proxiedMediaUrl(thumb)} alt={item.title ? `${item.title} preview` : ""} loading="lazy" style={isImage ? { objectFit:"contain" } : undefined} /> : null}
           </div>
           <h2 className="v2-detail-title" id="v2-detail-title">{item.title || item.url}</h2>
           <div className="v2-detail-source">{source.name}{item.folder || state.folder ? ` · ${item.folder || state.folder}` : " · Inbox"}</div>
