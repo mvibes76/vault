@@ -1,0 +1,45 @@
+name: Milestone 4-5 final UI validation
+
+on:
+  push:
+    branches: [milestone4-5-ui]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: contains(github.event.head_commit.message, '[validate-ui-final]')
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_VAULT_UI_V2: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install exact dependency graph
+        run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+      - name: Lint
+        run: npm run lint
+      - name: Tests and production build
+        run: npm run build
+      - name: Start local V2
+        run: |
+          npm start > /tmp/vault-ui.log 2>&1 &
+          echo $! > /tmp/vault-ui.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/vault-ui.log
+          exit 1
+      - name: Axe accessibility scan
+        run: |
+          npx --yes @axe-core/cli http://127.0.0.1:3000/ http://127.0.0.1:3000/library http://127.0.0.1:3000/collections --exit
+      - name: Stop local V2
+        if: always()
+        run: kill $(cat /tmp/vault-ui.pid) || true
