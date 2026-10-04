@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { SYNC_V2_ENABLED, getEntitySyncState, subscribeOutbox } from "@/lib/sync-outbox";
 
-export default function SyncBadge({ entityType="item", entityKey }) {
+export default function SyncBadge({ entityType="item", entityKey, style }) {
   const [state,setState]=useState(null);
   useEffect(()=>{
     if(!SYNC_V2_ENABLED) return;
@@ -22,7 +22,7 @@ export default function SyncBadge({ entityType="item", entityKey }) {
         background:error?"rgba(130,35,35,0.92)":"rgba(110,78,10,0.92)",
         border:"1px solid rgba(255,255,255,0.18)",
         color:"#fff",fontSize:9,fontWeight:800,letterSpacing:0.25,
-        backdropFilter:"blur(8px)"
+        backdropFilter:"blur(8px)", ...style
       }}
     >
       {error?"Not synced":"Syncing"}
