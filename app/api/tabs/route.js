@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { safeFetch, readTextLimited } from "@/lib/server/safe-url";
+import { guardProxyRequest, securityErrorResponse } from "@/lib/server/proxy-guard";
+
+const MAX_SHEET_META_BYTES = 2 * 1024 * 1024;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -7,20 +11,21 @@ export async function GET(request) {
   if (!sheetId) {
     return NextResponse.json({ error: "Missing sheet id" }, { status: 400 });
   }
+  if (!/^[A-Za-z0-9_-]{20,160}$/.test(sheetId)) return NextResponse.json({ error: "Invalid sheet id" }, { status: 400 });
+  try { await guardProxyRequest(request, "file"); }
+  catch (error) { return securityErrorResponse(error, "Sheet tabs unavailable"); }
 
   try {
     // Strategy 1: gviz/tq returns JSON with sheet metadata including all tab names
     // The response wraps JSON in: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
     const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
-    const gvizRes = await fetch(gvizUrl, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
+    const gvizRes = await safeFetch(gvizUrl, { headers: { "User-Agent": "Mozilla/5.0" }, timeoutMs: 10000, maxBytes: MAX_SHEET_META_BYTES });
 
     if (!gvizRes.ok) {
       throw new Error(`Sheet not accessible (${gvizRes.status}). Make sure it is shared as Anyone with link can view.`);
     }
 
-    const raw = await gvizRes.text();
+    const raw = await readTextLimited(gvizRes, MAX_SHEET_META_BYTES);
 
     // Extract the JSON object from the wrapper
     const jsonStr = raw.replace(/^[^{]*/, "").replace(/\);?\s*$/, "");
@@ -37,15 +42,17 @@ export async function GET(request) {
     
     // Strategy 2: Fetch the htmlview which has tab names embedded in JS
     const htmlUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`;
-    const htmlRes = await fetch(htmlUrl, {
+    const htmlRes = await safeFetch(htmlUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0",
         "Accept": "text/html,application/xhtml+xml",
       },
+      timeoutMs: 10000,
+      maxBytes: MAX_SHEET_META_BYTES,
     });
 
     if (htmlRes.ok) {
-      const html = await htmlRes.text();
+      const html = await readTextLimited(htmlRes, MAX_SHEET_META_BYTES);
       
       // Pattern 1: "sheetnames":["Tab1","Tab2"]
       const snMatch = html.match(/"sheetnames":\[([^\]]+)\]/);
@@ -96,11 +103,9 @@ export async function GET(request) {
     // Strategy 4: Use the Sheets API v4 without a key (works for public sheets via discovery)
     // /feeds/worksheets still works for some sheets despite being v3
     const feedUrl = `https://spreadsheets.google.com/feeds/worksheets/${sheetId}/public/basic?alt=json`;
-    const feedRes = await fetch(feedUrl, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
+    const feedRes = await safeFetch(feedUrl, { headers: { "User-Agent": "Mozilla/5.0" }, timeoutMs: 10000, maxBytes: MAX_SHEET_META_BYTES });
     if (feedRes.ok) {
-      const feedJson = await feedRes.json();
+      const feedJson = JSON.parse(await readTextLimited(feedRes, MAX_SHEET_META_BYTES));
       const entries = feedJson?.feed?.entry || [];
       if (entries.length > 0) {
         const tabs = entries.map((e) => e.title.$t).filter(Boolean);
@@ -115,7 +120,7 @@ export async function GET(request) {
     if (err.message === "NEEDS_MANUAL_TABS") {
       return NextResponse.json({ error: "NEEDS_MANUAL_TABS" }, { status: 200 });
     }
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return securityErrorResponse(err, "Sheet tabs unavailable");
   }
 }
 
