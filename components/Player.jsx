@@ -1052,6 +1052,22 @@ function RelayBadge({ text, active }) {
   );
 }
 
+function PlaybackIssue({ text, onOpenOriginal }) {
+  return (
+    <div style={{
+      position: "absolute", left: 12, right: 12, bottom: 12, zIndex: 4,
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+      padding: "10px 12px", borderRadius: 12,
+      background: "rgba(28,20,18,0.94)", border: "1px solid rgba(255,132,105,0.28)",
+      color: "rgba(255,220,212,0.96)", backdropFilter: "blur(16px)",
+      boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
+    }} role="alert">
+      <span style={{ fontSize: 11, lineHeight: 1.4 }}>{text}</span>
+      <button type="button" onClick={onOpenOriginal} style={{ ...miniBtn, width: "auto", minWidth: 44, padding: "0 11px", borderRadius: 10, color: "#fff" }}>Original</button>
+    </div>
+  );
+}
+
 function RefreshOverlay() {
   return (
     <div style={{
@@ -1068,7 +1084,7 @@ function RefreshOverlay() {
 }
 
 // ─── Image viewer with pinch/wheel zoom and drag pan ────────────────────────
-function ImageViewer({ src, alt }) {
+function ImageViewer({ src, alt, contained = false }) {
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const dragState  = useRef(null);
@@ -1138,7 +1154,10 @@ function ImageViewer({ src, alt }) {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, width: "100vw", height: "100dvh" }}>
+    <div style={contained
+      ? { position: "relative", width: "min(92vw, 1100px)", height: "min(76dvh, 820px)", overflow: "hidden", borderRadius: 14, background: "#09090a" }
+      : { position: "fixed", inset: 0, width: "100vw", height: "100dvh" }
+    }>
       <div
         onWheel={onWheel}
         onTouchStart={onTouchStart}
@@ -1150,7 +1169,7 @@ function ImageViewer({ src, alt }) {
         onMouseLeave={onMouseUp}
         onDoubleClick={onDoubleClick}
         style={{
-          width: "100vw", height: "100dvh",
+          width: contained ? "100%" : "100vw", height: contained ? "100%" : "100dvh",
           overflow: "hidden",
           display: "flex", alignItems: "center", justifyContent: "center",
           cursor: scale > 1 ? (dragState.current ? "grabbing" : "grab") : "zoom-in",
@@ -1164,7 +1183,7 @@ function ImageViewer({ src, alt }) {
           alt={alt}
           draggable={false}
           style={{
-            width: "100vw", height: "100dvh",
+            width: contained ? "100%" : "100vw", height: contained ? "100%" : "100dvh",
             objectFit: "contain", display: "block",
             transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
             transformOrigin: "center",
