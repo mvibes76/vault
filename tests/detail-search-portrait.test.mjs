@@ -57,6 +57,8 @@ test("Search exposes the protected external browser flow", () => {
   assert.match(route, /searchProvider\(attempt\.url, q, attempt\.parser\)/);
   assert.match(route, /duckduckgo-html/);
   assert.match(route, /duckduckgo-lite/);
+  assert.match(route, /bing-html/);
+  assert.match(route, /parseBingResults/);
   assert.match(route, /method:\s*"GET"/);
   assert.doesNotMatch(route, /method:\s*"POST"/);
   assert.doesNotMatch(route, /fetch\(DDG_HTML/);
