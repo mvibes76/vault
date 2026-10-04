@@ -49,7 +49,7 @@ export async function GET(request) {
       return NextResponse.json({ url: finalUrl, title: name, type: "video", thumbnail: "", description: "", siteName: new URL(finalUrl).hostname, contentType }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    if (contentType && !contentType.includes("html") && !contentType.includes("xml")) {
+    if (!contentType.includes("html") && !contentType.includes("xml")) {
       try { await res.body?.cancel(); } catch {}
       return NextResponse.json({ error: "Preview content type is not supported" }, { status: 415, headers: { "Cache-Control": "no-store" } });
     }
