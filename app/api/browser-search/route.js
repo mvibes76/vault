@@ -74,7 +74,7 @@ export async function GET(req) {
     });
     const upstream = await safeFetch(DDG_HTML, {
       method: "POST",
-      body,
+      body: body.toString(),
       timeoutMs: 7000,
       maxBytes: MAX_SEARCH_HTML_BYTES,
       headers: {
