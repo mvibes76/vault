@@ -5,6 +5,7 @@ import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { getThumb, getThumbCandidates, getSourceMeta } from "@/lib/sources";
 import { proxiedMediaUrl, normalizeCoverUrl } from "@/lib/utils";
+import SyncBadge from "./SyncBadge";
 
 export default function Card({
   item, onOpen, viewMode = "grid",
@@ -65,6 +66,7 @@ export default function Card({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, color: T.text1, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title || item.url}</div>
           <div style={{ fontSize: 11, color: T.text4, marginTop: 2 }}>{meta.name}{rating ? ` • ★ ${rating}` : ""}{watched ? " • watched" : ""}</div>
+          <SyncBadge entityKey={item.key} style={{ position: "static", display: "inline-block", marginTop: 4 }} />
         </div>
         <CardMenuButton {...{ item, fav, rating, folders, onToggleFavorite, onAssignFolder, isQuickAdd, onRemoveQuickAdd, onMarkWatched, onSetRating, onEditItem, menuOpen, setMenuOpen, menuRef }} />
       </div>
@@ -133,6 +135,8 @@ export default function Card({
         {rating > 0 && (
           <div style={{ position: "absolute", bottom: 8, left: 8, padding: "3px 7px", borderRadius: 999, background: "rgba(0,0,0,0.62)", border: "1px solid rgba(255,255,255,0.12)", color: T.amber, fontSize: 10, fontWeight: 700, backdropFilter: "blur(8px)" }}>★ {rating}</div>
         )}
+
+        <SyncBadge entityKey={item.key} style={{ left: "auto", right: fav ? 38 : 8, top: 8, bottom: "auto" }} />
 
         {/* Favorite */}
         {fav && (
