@@ -5,7 +5,7 @@ import { getSourceMeta, getThumbCandidates } from "@/lib/sources";
 import { proxiedMediaUrl } from "@/lib/utils";
 import {
   getItemComments, addItemComment, deleteItemComment,
-  getMomentMarks, addMomentMark,
+  getMomentMarks,
 } from "@/lib/supabase";
 
 function formatTime(seconds) {
@@ -19,19 +19,19 @@ function formatTime(seconds) {
 export default function DetailDrawer({
   item, state = {}, folders = [], userId,
   onClose, onPlay, onFavorite, onFolder, onRating, onEdit, onDelete,
+  activityRevision = 0,
 }) {
   const ref = useRef(null);
   const [tab, setTab] = useState("activity");
   const [comments, setComments] = useState([]);
   const [marks, setMarks] = useState([]);
   const [comment, setComment] = useState("");
-  const [markSeconds, setMarkSeconds] = useState("");
-  const [markNote, setMarkNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const source = useMemo(() => getSourceMeta(item?.url || ""), [item?.url]);
-  const thumb = item?.thumbnail || getThumbCandidates(item?.url || "")[0] || "";
+  const thumb = item?.display_thumbnail || item?.thumbnail || getThumbCandidates(item?.url || "")[0] || "";
+  const isImage = source.id === "image" || String(item?.type || "").toLowerCase().includes("image");
   const duration = Number(state?.duration || 0);
   const progress = Number(state?.progress || 0);
   const progressPct = duration > 0 ? Math.max(0, Math.min(100, progress / duration * 100)) : 0;
@@ -45,7 +45,7 @@ export default function DetailDrawer({
       setMarks(m || []);
     });
     return () => { active = false; };
-  }, [item, userId]);
+  }, [item, userId, activityRevision]);
 
   useEffect(() => {
     if (!item || !ref.current) return;
@@ -85,19 +85,6 @@ export default function DetailDrawer({
     setComments((x) => x.filter((c) => c.id !== id));
   };
 
-  const addMark = async () => {
-    if (!userId || busy) return;
-    const seconds = Math.max(0, Number(markSeconds || 0));
-    const note = markNote.trim();
-    if (!note && !seconds) return;
-    setBusy(true);
-    try {
-      await addMomentMark(userId, item.key, { seconds, note });
-      setMarks(await getMomentMarks(userId, item.key));
-      setMarkSeconds(""); setMarkNote("");
-    } finally { setBusy(false); }
-  };
-
   return (
     <>
       <div className="v2-backdrop" onMouseDown={onClose} aria-hidden="true" />
@@ -114,7 +101,7 @@ export default function DetailDrawer({
           <div className="v2-detail-source">{source.name}{item.folder || state.folder ? ` · ${item.folder || state.folder}` : " · Inbox"}</div>
 
           <div className="v2-action-row">
-            <button type="button" className="v2-btn v2-btn-primary" onClick={() => onPlay(item)}><Icon name="play" size={15} filled/> Open / Play</button>
+            <button type="button" className="v2-btn v2-btn-primary" onClick={() => onPlay(item)}><Icon name={isImage ? "zoomIn" : "play"} size={15} filled={!isImage}/> {isImage ? "Open image" : "Open / Play"}</button>
             <button type="button" className="v2-btn" onClick={() => onFavorite(item.key, !!state.favorite)}>
               <Icon name="star" size={15} filled={!!state.favorite}/>{state.favorite ? "Favorited" : "Favorite"}
             </button>
@@ -175,14 +162,10 @@ export default function DetailDrawer({
                 <div className="v2-detail-label">Moment marks</div>
                 {marks.length ? marks.map((m) => (
                   <div className="v2-comment" key={m.id}>
-                    <strong>{formatTime(m.seconds)}</strong>{m.note ? <span style={{ color:"var(--v2-muted)" }}> · {m.note}</span> : null}
+                    <strong>{formatTime(m.seconds)}</strong>{m.rating ? <span style={{ color:"var(--v2-muted)" }}> · ★ {m.rating}</span> : null}{m.note ? <span style={{ color:"var(--v2-muted)" }}> · {m.note}</span> : null}
                   </div>
-                )) : <p className="v2-hint">Save moments you want to revisit.</p>}
-                <div style={{ display:"grid", gridTemplateColumns:"100px minmax(0,1fr)", gap:8 }}>
-                  <input className="v2-input" inputMode="numeric" value={markSeconds} onChange={(e)=>setMarkSeconds(e.target.value)} placeholder="Seconds" aria-label="Moment time in seconds"/>
-                  <input className="v2-input" value={markNote} onChange={(e)=>setMarkNote(e.target.value)} placeholder="What happens here?" aria-label="Moment note"/>
-                </div>
-                <button type="button" className="v2-btn" style={{ marginTop:8 }} onClick={addMark} disabled={busy || (!markNote.trim() && !markSeconds)}>Add mark</button>
+                )) : <p className="v2-hint">No moments marked yet.</p>}
+                {!isImage ? <p className="v2-hint" style={{ marginTop:10 }}>Add Moment Marks while the media is playing. They appear here automatically.</p> : null}
               </div>
             </div>
           ) : (
