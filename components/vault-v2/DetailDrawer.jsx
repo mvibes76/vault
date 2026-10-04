@@ -28,6 +28,7 @@ export default function DetailDrawer({
   const [markSeconds, setMarkSeconds] = useState("");
   const [markNote, setMarkNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const source = useMemo(() => getSourceMeta(item?.url || ""), [item?.url]);
   const thumb = item?.thumbnail || getThumbCandidates(item?.url || "")[0] || "";
@@ -194,7 +195,15 @@ export default function DetailDrawer({
               <div className="v2-detail-kv"><span>Cover</span><span>{item.cover_mode || "automatic"}</span></div>
               <button type="button" className="v2-btn" style={{ marginTop:14 }} onClick={() => onEdit(item)}>Edit details</button>
               <div className="v2-detail-block" style={{ marginTop:18 }}>
-                <button type="button" className="v2-btn v2-btn-danger" onClick={() => onDelete(item)}>Delete from Vault</button>
+                {confirmDelete ? (
+  <div style={{ display:"grid", gap:8 }}>
+    <div className="v2-hint">This removes the item from Vault. This action cannot be undone.</div>
+    <div style={{ display:"flex", gap:8 }}>
+      <button type="button" className="v2-btn v2-btn-danger" onClick={() => onDelete(item)}>Confirm delete</button>
+      <button type="button" className="v2-btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
+    </div>
+  </div>
+) : <button type="button" className="v2-btn v2-btn-danger" onClick={() => setConfirmDelete(true)}>Delete from Vault</button>}
               </div>
             </div>
           )}
