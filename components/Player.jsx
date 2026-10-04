@@ -568,14 +568,17 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           <video
             ref={videoRef}
             src={mediaSrc}
+            poster={item.display_thumbnail ? proxiedMediaUrl(item.display_thumbnail) : (item.thumbnail ? proxiedMediaUrl(item.thumbnail) : undefined)}
             controls autoPlay playsInline preload="metadata"
             muted={muted}
             onTimeUpdate={onTimeUpdate}
             onError={handleVideoError}
             onLoadedMetadata={onLoadedMetadata}
+            onCanPlay={validateRelayVideoTrack}
             style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: isFullscreen ? 0 : 8, display: "block", background: "#000", filter: enhanceFilter }}
           />
           {relayReason && <RelayBadge text={relayReason} active={useRelay} />}
+          {playbackIssue && <PlaybackIssue text={playbackIssue} onOpenOriginal={() => window.open(item.url, "_blank", "noopener,noreferrer")} />}
           {refreshing && <RefreshOverlay />}
         </div>
       );
@@ -586,14 +589,17 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
         <div style={mediaShell(isFullscreen)}>
           <video
             ref={videoRef}
+            poster={item.display_thumbnail ? proxiedMediaUrl(item.display_thumbnail) : (item.thumbnail ? proxiedMediaUrl(item.thumbnail) : undefined)}
             controls autoPlay playsInline preload="metadata"
             muted={muted}
             onTimeUpdate={onTimeUpdate}
             onError={handleVideoError}
             onLoadedMetadata={onLoadedMetadata}
+            onCanPlay={validateRelayVideoTrack}
             style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: isFullscreen ? 0 : 8, display: "block", background: "#000", filter: enhanceFilter }}
           />
           {relayReason && <RelayBadge text={relayReason} active={useRelay} />}
+          {playbackIssue && <PlaybackIssue text={playbackIssue} onOpenOriginal={() => window.open(item.url, "_blank", "noopener,noreferrer")} />}
           {refreshing && <RefreshOverlay />}
         </div>
       );
@@ -614,6 +620,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           <video
             ref={videoRef}
             src={embed.src}
+            poster={item.display_thumbnail ? proxiedMediaUrl(item.display_thumbnail) : (item.thumbnail ? proxiedMediaUrl(item.thumbnail) : undefined)}
             controls autoPlay playsInline preload="metadata"
             muted={muted}
             onTimeUpdate={onTimeUpdate}
@@ -630,7 +637,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     }
 
     if (embed.kind === "image") {
-      return <ImageViewer src={embed.src} alt={item.title || ""} />;
+      return <ImageViewer src={proxiedMediaUrl(embed.src)} alt={item.title || ""} contained={integrated} />;
     }
 
     return null;
