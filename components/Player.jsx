@@ -651,6 +651,87 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     backdropTap.current = now;
   };
 
+  const timeBasedMedia = embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback);
+  const actionBtn = integrated ? integratedCtrlBtn : ctrlBtn;
+  const controlBar = (
+    <>
+      {timeBasedMedia && (
+        <select value={enhanceMode} onChange={(e) => { e.stopPropagation(); setEnhanceMode(e.target.value); }} onClick={(e) => e.stopPropagation()} style={integrated ? integratedSelectBtn : selectBtn} title="View enhancement" aria-label="View enhancement">
+          <option value="off">Enhance Off</option>
+          <option value="soft">Soft</option>
+          <option value="crisp">Crisp</option>
+          <option value="cinema">Cinema</option>
+        </select>
+      )}
+      {qualityLevels.length > 0 && (
+        <select value={quality} onChange={(e) => { e.stopPropagation(); setQuality(e.target.value); }} onClick={(e) => e.stopPropagation()} style={integrated ? integratedSelectBtn : selectBtn} title="HLS quality" aria-label="HLS quality">
+          <option value="auto">Auto</option>
+          {qualityLevels.map((l) => <option key={l.idx} value={l.idx}>{l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}kbps`}</option>)}
+        </select>
+      )}
+      {!integrated && (
+        <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.07)", borderRadius: 999, padding: "0 8px", height: 38, backdropFilter: "blur(12px)" }}>
+          {[1,2,3,4,5].map((n) => <button key={n} onClick={(e) => { e.stopPropagation(); onRate?.(rating === n ? null : n); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 16, padding: 1 }}>★</button>)}
+        </div>
+      )}
+      {timeBasedMedia && (
+        <button onClick={(e) => { e.stopPropagation(); markMoment(); }} style={{ ...actionBtn, width: "auto", minWidth: 44, padding: "0 12px", borderRadius: 12, fontSize: 11, gap: 6 }} title="Mark this timestamp" aria-label="Mark this moment">
+          <Icon name="clock" size={14} /> Mark
+        </button>
+      )}
+      <button onClick={(e) => { e.stopPropagation(); setShowComments((v) => !v); }} style={{ ...actionBtn, background: showComments ? "rgba(255,255,255,0.16)" : actionBtn.background }} title="Comments" aria-label="Comments">
+        <Icon name="comment" size={15} />
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); openPopout(); }} style={actionBtn} title="Pop out" aria-label="Pop out media">
+        <Icon name="external" size={14} />
+      </button>
+      {(embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setPlaybackIssue("");
+            if (!useRelay) {
+              setUseRelay(true);
+              showRelayNotice("Secure relay enabled.");
+            } else {
+              setUseRelay(false);
+              showRelayNotice("Direct playback restored.");
+            }
+          }}
+          style={{ ...actionBtn, background: useRelay ? "rgba(93,220,122,0.14)" : actionBtn.background, color: useRelay ? "#a7efb6" : actionBtn.color }}
+          title={useRelay ? "Use direct playback" : "Use secure relay"}
+          aria-label={useRelay ? "Disable secure relay" : "Enable secure relay"}
+        >
+          <Icon name="sync" size={15} />
+        </button>
+      )}
+      {baseEmbed?.kind === "extract" && extracted && (
+        <button onClick={(e) => { e.stopPropagation(); refreshCount.current = 0; refreshStream({ preserveRelay: useRelay }); }} style={actionBtn} title="Refresh stream" aria-label="Refresh stream">
+          <Icon name="sync" size={15} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
+        </button>
+      )}
+      {canPip && (
+        <button onClick={(e) => { e.stopPropagation(); togglePiP(); }} style={{ ...actionBtn, background: isPiP ? "rgba(255,255,255,0.16)" : actionBtn.background }} title="Picture in Picture" aria-label="Picture in Picture">
+          <Icon name="pip" size={15} />
+        </button>
+      )}
+      {canFullscreen && (
+        <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} style={{ ...actionBtn, background: isFullscreen ? "rgba(255,255,255,0.16)" : actionBtn.background }} title={isFullscreen ? "Exit fullscreen" : "Fullscreen"} aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+          <Icon name="fullscreen" size={15} />
+        </button>
+      )}
+      {canMute && (
+        <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} style={actionBtn} title={muted ? "Unmute" : "Mute"} aria-label={muted ? "Unmute" : "Mute"}>
+          <Icon name={muted ? "volumeOff" : "volume"} size={15} />
+        </button>
+      )}
+      <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...actionBtn, textDecoration: "none" }} title="Open original" aria-label="Open original source">
+        <Icon name="external" size={14} />
+      </a>
+      <button onClick={handleClose} style={actionBtn} title="Close" aria-label="Close player"><Icon name="x" size={15} /></button>
+    </>
+  );
+
   return (
     <div
       onClick={handleBackdropClick}
@@ -658,103 +739,56 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
       onTouchEnd={onTouchEnd}
       style={{
         position: "fixed", inset: 0, zIndex: 999,
-        background: "rgba(0,0,0,0.95)",
+        background: integrated ? "rgba(3,3,4,0.84)" : "rgba(0,0,0,0.95)",
         display: "flex", alignItems: "center", justifyContent: "center",
-        backdropFilter: "blur(12px)",
+        padding: integrated ? "max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom))" : 0,
+        backdropFilter: integrated ? "blur(22px)" : "blur(12px)",
       }}
     >
-      {/* Top controls */}
-      <div style={topControls}>
-        {(embed?.kind === "video" || embed?.kind === "hls" || embed?.kind === "youtube-api" || (embed?.kind === "drive" && !driveFallback)) && (
-          <select value={enhanceMode} onChange={(e) => { e.stopPropagation(); setEnhanceMode(e.target.value); }} onClick={(e) => e.stopPropagation()} style={selectBtn} title="View enhancement">
-            <option value="off">Enhance Off</option>
-            <option value="soft">Soft</option>
-            <option value="crisp">Crisp</option>
-            <option value="cinema">Cinema</option>
-          </select>
-        )}
-        {qualityLevels.length > 0 && (
-          <select value={quality} onChange={(e) => { e.stopPropagation(); setQuality(e.target.value); }} onClick={(e) => e.stopPropagation()} style={selectBtn} title="HLS quality">
-            <option value="auto">Auto</option>
-            {qualityLevels.map((l) => <option key={l.idx} value={l.idx}>{l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}kbps`}</option>)}
-          </select>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.07)", borderRadius: 999, padding: "0 8px", height: 38, backdropFilter: "blur(12px)" }}>
-          {[1,2,3,4,5].map((n) => <button key={n} onClick={(e) => { e.stopPropagation(); onRate?.(rating === n ? null : n); }} style={{ background: "transparent", border: "none", color: n <= rating ? T.amber : T.text4, cursor: "pointer", fontSize: 16, padding: 1 }}>★</button>)}
-        </div>
-        <button onClick={(e) => { e.stopPropagation(); markMoment(); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Mark this timestamp">
-          Mark
-        </button>
-        <button onClick={(e) => { e.stopPropagation(); setShowComments((v) => !v); }} style={{ ...ctrlBtn, background: showComments ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title="Comments">
-          <Icon name="comment" size={15} />
-        </button>
-        <button onClick={(e) => { e.stopPropagation(); openPopout(); }} style={ctrlBtn} title="Pop out player">
-          <Icon name="external" size={14} />
-        </button>
-        {(embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && !useRelay && (
-          <button onClick={(e) => { e.stopPropagation(); setRelayReason("Using the secure relay path."); setUseRelay(true); }} style={{ ...ctrlBtn, width: "auto", padding: "0 10px", borderRadius: 18, fontSize: 11 }} title="Use secure relay">
-            Relay
-          </button>
-        )}
-        {baseEmbed?.kind === "extract" && extracted && (
-          <button onClick={(e) => { e.stopPropagation(); refreshCount.current = 0; refreshStream(); }} style={ctrlBtn} title="Refresh stream (use if playback stops)">
-            <Icon name="sync" size={15} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
-          </button>
-        )}
-        {canPip && (
-          <button onClick={(e) => { e.stopPropagation(); togglePiP(); }} style={{ ...ctrlBtn, background: isPiP ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title="Picture in Picture">
-            <Icon name="pip" size={15} />
-          </button>
-        )}
-        {canFullscreen && (
-          <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} style={{ ...ctrlBtn, background: isFullscreen ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)" }} title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
-            <Icon name="fullscreen" size={15} />
-          </button>
-        )}
-        {canMute && (
-          <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} style={ctrlBtn} title={muted ? "Unmute" : "Mute"}>
-            <Icon name={muted ? "volumeOff" : "volume"} size={15} />
-          </button>
-        )}
-        <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...ctrlBtn, textDecoration: "none" }} title="Open original">
-          <Icon name="external" size={14} />
-        </a>
-        <button onClick={handleClose} style={ctrlBtn} title="Close"><Icon name="x" size={15} /></button>
-      </div>
-      {markNotice && <div style={markToast}>{markNotice}</div>}
-      <style jsx global>{`@keyframes vaultWebSquirt { 0% { opacity: 0; transform: translateX(64px) scaleX(0.08) scaleY(0.72) rotate(-8deg); filter: blur(5px); } 16% { opacity: 0.98; filter: blur(0.3px); } 62% { opacity: 0.86; transform: translateX(-18vw) scaleX(1.08) scaleY(1) rotate(-4deg); filter: blur(0.6px); } 100% { opacity: 0; transform: translateX(-24vw) scaleX(1.18) scaleY(1.08) rotate(-2deg); filter: blur(3px); } } @keyframes vaultWebDrip { 0% { transform: translateY(-7px); opacity: 0; } 28% { opacity: 0.92; } 100% { transform: translateY(28px); opacity: 0; } }`}</style>
-
-      {/* Title chip (bottom) */}
-      {item.title && (
-        <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", maxWidth: "78vw", padding: "6px 14px", background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 999, color: T.text2, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", backdropFilter: "blur(10px)" }}>
-          {item.title}
-        </div>
-      )}
-
-      {/* Nav arrows */}
       {hasPrev && (
-        <button onClick={(e) => { e.stopPropagation(); onNavigate?.(currentIdx - 1); }} style={{ ...arrowBtn, left: 12 }}>
+        <button onClick={(e) => { e.stopPropagation(); onNavigate?.(currentIdx - 1); }} style={{ ...arrowBtn, left: integrated ? 8 : 12 }} aria-label="Previous item">
           <Icon name="chevronLeft" size={22} />
         </button>
       )}
       {hasNext && (
-        <button onClick={(e) => { e.stopPropagation(); onNavigate?.(currentIdx + 1); }} style={{ ...arrowBtn, right: 12 }}>
+        <button onClick={(e) => { e.stopPropagation(); onNavigate?.(currentIdx + 1); }} style={{ ...arrowBtn, right: integrated ? 8 : 12 }} aria-label="Next item">
           <Icon name="chevronRight" size={22} />
         </button>
       )}
 
-      <button
-        onClick={triggerOil}
-        style={oilBtn}
-        title="Web squirt"
-        aria-label="Web squirt"
-      >
-        <span style={oilDropIcon} />
-        {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
-      </button>
-      {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, bottom: `${118 + idx * 8}px` }}><span style={oilDripOne} /><span style={oilDripTwo} /><span style={oilDripThree} /></div>)}
+      {integrated ? (
+        <section onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : integratedPlayerSurface} aria-label={item.title || "Media player"}>
+          {!isFullscreen && (
+            <header style={integratedPlayerHeader}>
+              <div style={integratedPlayerIdentity}>
+                <div style={integratedPlayerTitle} title={item.title || item.url}>{item.title || item.url}</div>
+                <div style={integratedPlayerMeta}>{embed?.source?.name || "Saved media"}{useRelay ? " · Secure relay" : ""}</div>
+              </div>
+              <div style={integratedControls}>{controlBar}</div>
+            </header>
+          )}
+          {isFullscreen && <div style={topControls}>{controlBar}</div>}
+          {markNotice && <div style={integrated ? integratedMarkToast : markToast} role="status">{markNotice}</div>}
+          <div ref={stageRef} style={isFullscreen ? fullscreenStage : integratedStage}>{renderStage()}</div>
+        </section>
+      ) : (
+        <>
+          <div style={topControls}>{controlBar}</div>
+          {markNotice && <div style={markToast}>{markNotice}</div>}
+          {item.title && (
+            <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", maxWidth: "78vw", padding: "6px 14px", background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 999, color: T.text2, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", backdropFilter: "blur(10px)" }}>
+              {item.title}
+            </div>
+          )}
+          <button onClick={triggerOil} style={oilBtn} title="Web squirt" aria-label="Web squirt">
+            <span style={oilDropIcon} />
+            {oilCount > 0 && <span style={oilCountBadge}>{oilCount}</span>}
+          </button>
+          {oilBursts.map((burst, idx) => <div key={burst.id} style={{ ...oilSplash, bottom: `${118 + idx * 8}px` }}><span style={oilDripOne} /><span style={oilDripTwo} /><span style={oilDripThree} /></div>)}
+          <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
+        </>
+      )}
 
-      <div ref={stageRef} onClick={(e) => e.stopPropagation()} style={isFullscreen ? fullscreenStage : undefined}>{renderStage()}</div>
       {showComments && (
         <CommentsPanel
           userId={userId}
@@ -763,6 +797,7 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
           onClose={() => setShowComments(false)}
         />
       )}
+      <style jsx global>{`@keyframes vaultWebSquirt { 0% { opacity: 0; transform: translateX(64px) scaleX(0.08) scaleY(0.72) rotate(-8deg); filter: blur(5px); } 16% { opacity: 0.98; filter: blur(0.3px); } 62% { opacity: 0.86; transform: translateX(-18vw) scaleX(1.08) scaleY(1) rotate(-4deg); filter: blur(0.6px); } 100% { opacity: 0; transform: translateX(-24vw) scaleX(1.18) scaleY(1.08) rotate(-2deg); filter: blur(3px); } } @keyframes vaultWebDrip { 0% { transform: translateY(-7px); opacity: 0; } 28% { opacity: 0.92; } 100% { transform: translateY(28px); opacity: 0; } }`}</style>
     </div>
   );
 }
