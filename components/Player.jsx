@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Icon from "./Icons";
 import { T } from "@/lib/theme";
 import { getEmbed } from "@/lib/sources";
-import { proxiedStreamUrl } from "@/lib/utils";
+import { proxiedMediaUrl, proxiedStreamUrl } from "@/lib/utils";
 import { saveProgress, getItemComments, addItemComment, deleteItemComment } from "@/lib/supabase";
 
 // ─── YouTube IFrame API loader (one-time, page-wide) ─────────────────────────
@@ -46,12 +46,14 @@ function loadTwitterWidgets(cb) {
 
 // ─── Main Player ────────────────────────────────────────────────────────────
 
-export default function Player({ item, items = [], currentIdx = 0, onNavigate, onClose, userId, resumeAt = 0, rating = 0, onRate, onAddMoment, oilCount = 0, onOil }) {
+export default function Player({ item, items = [], currentIdx = 0, onNavigate, onClose, userId, resumeAt = 0, rating = 0, onRate, onAddMoment, oilCount = 0, onOil, variant = "legacy" }) {
+  const integrated = variant === "integrated";
   const [muted, setMuted]   = useState(false);
   const [isPiP, setIsPiP]   = useState(false);
   const [parent, setParent] = useState("localhost");
   const [useRelay, setUseRelay] = useState(false);
   const [relayReason, setRelayReason] = useState("");
+  const [playbackIssue, setPlaybackIssue] = useState("");
   const [enhanceMode, setEnhanceMode] = useState("off");
   const [qualityLevels, setQualityLevels] = useState([]);
   const [quality, setQuality] = useState("auto");
@@ -70,12 +72,14 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   const refreshCount = useRef(0); // bail after too many auto-refresh attempts
   const hlsRecoverCount = useRef(0); // recover once before falling back to relay
   const markNoticeTimer = useRef(null);
+  const relayNoticeTimer = useRef(null);
   const seekTarget = useRef(0);   // where to resume after a refresh
 
   // Reset relay mode when changing items. Direct playback is always tried first.
   useEffect(() => {
     setUseRelay(false);
     setRelayReason("");
+    setPlaybackIssue("");
     setQualityLevels([]);
     setQuality("auto");
     hlsRecoverCount.current = 0;
@@ -90,6 +94,12 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   // Set Twitch parent param from current hostname (required by Twitch embeds)
   useEffect(() => {
     if (typeof window !== "undefined") setParent(window.location.hostname || "localhost");
+  }, []);
+
+  const showRelayNotice = useCallback((message, timeoutMs = 2600) => {
+    setRelayReason(message);
+    if (relayNoticeTimer.current) clearTimeout(relayNoticeTimer.current);
+    relayNoticeTimer.current = setTimeout(() => setRelayReason(""), timeoutMs);
   }, []);
 
   const baseEmbed = getEmbed(item.url, { muted, parent });
@@ -129,25 +139,22 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
   }, [item.url, baseEmbed?.kind]);
 
   // Refresh the stream: keep current playback position, re-extract, swap src.
-  const refreshStream = useCallback(async () => {
+  const refreshStream = useCallback(async ({ preserveRelay = false } = {}) => {
     if (baseEmbed?.kind !== "extract") return;
     if (refreshing) return;
     seekTarget.current = videoRef.current?.currentTime || 0;
     setRefreshing(true);
     const next = await runExtract({ cacheBust: true });
     if (next) {
-      // Force the <video> element to remount with the new src by clearing
-      // extracted first, then setting it. Without the clear, React skips
-      // the update if the URL host is the same and only the token differs.
       setExtracted(null);
-      setUseRelay(false);
-      setRelayReason("");
-      // Defer one tick so React commits the unmount
+      setUseRelay(preserveRelay);
+      setPlaybackIssue("");
       setTimeout(() => setExtracted(next), 0);
       refreshCount.current += 1;
+      if (preserveRelay) showRelayNotice("Secure stream refreshed.");
     }
     setRefreshing(false);
-  }, [baseEmbed?.kind, refreshing, runExtract]);
+  }, [baseEmbed?.kind, refreshing, runExtract, showRelayNotice]);
 
   // After a refresh, when the new <video> mounts, seek back to where we left off.
   // Triggered by onLoadedMetadata in the video element below.
@@ -158,19 +165,43 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     }
   };
 
+  const validateRelayVideoTrack = () => {
+    const v = videoRef.current;
+    if (!v || !useRelay) return;
+    setTimeout(() => {
+      const current = videoRef.current;
+      if (!current || !useRelay || current.error) return;
+      if (current.readyState >= 2 && current.videoWidth === 0 && current.videoHeight === 0) {
+        setPlaybackIssue("Audio is available, but this browser could not decode the video track. Try Open original or another browser/device.");
+      } else if (current.videoWidth > 0 && current.videoHeight > 0) {
+        setPlaybackIssue("");
+      }
+    }, 350);
+  };
+
   // <video> error handler. Most common cause: signed URL expired mid-playback.
   // Auto-refresh up to 2 times before giving up.
   const handleVideoError = () => {
-    // First failure path: the browser likely hit CORS on a direct file/HLS stream.
-    // Switch the same source through the secured server relay before giving up.
     if ((embed?.kind === "video" || embed?.kind === "hls") && embed?.src && /^https?:\/\//i.test(embed.src) && !useRelay) {
-      setRelayReason("Direct playback was blocked. Using the secure relay path.");
+      setPlaybackIssue("");
       setUseRelay(true);
+      showRelayNotice("Direct playback was blocked. Secure relay enabled.");
+      return;
+    }
+
+    if (useRelay && baseEmbed?.kind === "extract" && refreshCount.current < 2) {
+      showRelayNotice("Refreshing the secure stream…");
+      refreshStream({ preserveRelay: true });
+      return;
+    }
+
+    if (useRelay) {
+      setPlaybackIssue("The secure relay reached the media, but this browser could not play the video track. Open the original source or try another browser/device.");
       return;
     }
 
     if (baseEmbed?.kind !== "extract") {
-      setRelayReason("Playback failed. Open the original source or move this file to a CORS-friendly host.");
+      setPlaybackIssue("Playback failed. Open the original source or use the secure relay.");
       return;
     }
     if (refreshCount.current >= 2) {
@@ -244,7 +275,10 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
   }, [hasNext, hasPrev, currentIdx, onNavigate, handleClose]);
 
-  useEffect(() => () => { if (markNoticeTimer.current) clearTimeout(markNoticeTimer.current); }, []);
+  useEffect(() => () => {
+    if (markNoticeTimer.current) clearTimeout(markNoticeTimer.current);
+    if (relayNoticeTimer.current) clearTimeout(relayNoticeTimer.current);
+  }, []);
 
   // ── YouTube IFrame setup + progress save on unmount ─────────────────────
   useEffect(() => {
@@ -416,13 +450,17 @@ export default function Player({ item, items = [], currentIdx = 0, onNavigate, o
 
   const enhanceFilter = enhanceMode === "crisp" ? "contrast(1.24) saturate(1.1) brightness(1.04)" : enhanceMode === "cinema" ? "contrast(1.14) saturate(0.96) brightness(0.98)" : enhanceMode === "soft" ? "contrast(1.05) saturate(1.03) brightness(1.01)" : "none";
 
-  const markMoment = () => {
+  const markMoment = async () => {
     const seconds = videoRef.current?.currentTime || ytPlayer.current?.getCurrentTime?.() || Number(resumeAt || 0) || 0;
     const markRating = rating || null;
-    onAddMoment?.({ seconds, rating: markRating });
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
-    setMarkNotice(`Marked ${mins}:${secs}${markRating ? ` · ★ ${markRating}` : ""}`);
+    try {
+      await Promise.resolve(onAddMoment?.({ seconds, rating: markRating }));
+      setMarkNotice(`Marked ${mins}:${secs}${markRating ? ` · ★ ${markRating}` : ""}`);
+    } catch {
+      setMarkNotice("Could not save this Moment Mark.");
+    }
     if (markNoticeTimer.current) clearTimeout(markNoticeTimer.current);
     markNoticeTimer.current = setTimeout(() => setMarkNotice(""), 1800);
   };
