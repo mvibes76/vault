@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vault · Save Images</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="kicker">VAULT / CHROME</span>
+    <h1>Save to Vault</h1>
+    <p>Right-click any image to save it, or collect images from this gallery.</p>
+  </header>
+
+  <div class="toolbar primary">
+    <button id="scan">Find images on page</button>
+    <button id="all">Select all</button>
+    <button id="clear">Clear</button>
+  </div>
+  <div class="toolbar filter" role="group" aria-label="Media filter">
+    <button data-filter="all" aria-pressed="true">All</button>
+    <button data-filter="image">Images</button>
+    <button data-filter="video">Videos</button>
+  </div>
+  <p id="state" role="status">Checking this tab…</p>
+  <div id="items" aria-label="Media found"></div>
+
+  <details class="sheet-import" id="sheet-section">
+    <summary>Import a Google Sheets URL list <span>CSV / pasted cells</span></summary>
+    <p>Copy cells from Sheets, choose a CSV/TSV file, or load a publicly accessible Google Sheet link. Private Sheets still require a copied/exported file.</p>
+    <div class="sheet-actions"><input type="url" id="sheet-link" placeholder="Google Sheets link (public)" aria-label="Public Google Sheets link"><button type="button" id="sheet-load">Load sheet</button></div>
+    <textarea id="sheet-text" rows="4" placeholder="URL    Title    Type
+https://example.com/original.jpg    Example photo    image" aria-label="Paste URLs or copied Google Sheets cells"></textarea>
+    <label class="small-check"><input type="checkbox" id="unknown-as-image"> Treat links without image extensions as images</label>
+    <div class="sheet-actions">
+      <button type="button" id="sheet-add">Add URLs to selection</button>
+      <label class="sheet-upload">Choose CSV / TSV <input id="sheet-file" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" hidden></label>
+    </div>
+    <p id="sheet-result" role="status"></p>
+  </details>
+
+  <details class="smart-capture">
+    <summary>Smart Image Capture (canvas / protected preview)</summary>
+    <p>When there's no reusable image URL, save the visible image as a PNG, then upload it in Vault. This is a screenshot, not an original-resolution file.</p>
+    <div class="toolbar"><button id="smart-crop">Capture main image</button><button id="pick-image">Pick exact image</button></div>
+    <small id="smart-result" role="status"></small>
+  </details>
+
+  <details class="vault-settings">
+    <summary>Vault destination <span id="vault-host-label"></span></summary>
+    <label for="vault-url">Vault website address</label>
+    <input id="vault-url" type="url" placeholder="https://your-vault-site.com">
+    <button type="button" id="save-vault-url">Save destination</button>
+    <p id="vault-url-result" role="status"></p>
+  </details>
+
+  <footer>
+    <div class="footer-meta"><small id="selected">0 selected</small><small>Review before saving</small></div>
+    <button type="button" id="send" disabled>Send selected to Vault →</button>
+    <button type="button" id="copy" disabled>Copy selected (manual fallback)</button>
+    <p>Opens your existing Vault import page and prepares a review. No passwords or website cookies are collected. Original image links can expire or remain restricted by their source.</p>
+  </footer>
+
+<script src="batch-parser.js"></script>
+<script src="popup.js"></script>
+<script src="smart-screenshot.js"></script>
+</body>
+</html>

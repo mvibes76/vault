@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Vault — Save Images",
+  "version": "1.2.0",
+  "description": "Save images by right-click, collect gallery images, and import Google Sheets URL lists to your existing Vault library.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "webRequest",
+    "storage",
+    "clipboardWrite",
+    "downloads",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Vault Media Capture",
+    "default_popup": "popup.html"
+  }
+}
