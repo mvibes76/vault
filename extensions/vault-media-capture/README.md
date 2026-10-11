@@ -6,7 +6,9 @@ Desktop Chrome companion for MVibes Vault V40.
 1. Download this feature branch as a ZIP from GitHub and unzip.
 2. Go to `chrome://extensions`, enable **Developer mode**, and click **Load unpacked**.
 3. Select the folder `extensions/vault-media-capture`.
-4. Pin the extension. If needed, set **Vault destination** to the HTTPS Vault website URL. The default is `https://vault-mikevibes76.vercel.app`.
+4. Pin the extension.
+5. **While this is a draft PR**, expand **Vault destination** and use the branch preview URL `https://vault-git-feat-chrome-folder-picker-bulk-cap-23dc96-mikevibes76.vercel.app`. The production default (`https://vault-mikevibes76.vercel.app`) does not have `/capture` until the PR is merged. Vercel may require an authorized sign-in on preview builds.
+6. After the PR is merged and deployed, change Vault destination back to `https://vault-mikevibes76.vercel.app`.
 
 ## Save one image
 Right-click an image and choose **Save image to Vault**.
