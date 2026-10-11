@@ -57,7 +57,7 @@ function render() {
   updateStatus();
 }
 function updateStatus() {
-  selectedEl.textContent = selected.size + " selected";
+  selectedEl.textContent = selected.size + " selected" + (selected.size > 300 ? " (300 per batch)" : "");
   copyBtn.disabled = selected.size === 0;
   sendBtn.disabled = selected.size === 0;
 }
@@ -148,16 +148,16 @@ document.querySelectorAll("[data-filter]").forEach((button) => button.addEventLi
   render();
 }));
 function selectedItems() {
-  return [...saved.values()].filter(item=>selected.has(item.url));
+  return [...saved.values()].filter(item=>selected.has(item.url)).slice(0,300);
 }
 function makePayload(items) {
-  return JSON.stringify({format:"vault-media-capture-v1",sourcePage:currentTab?.url||"",items},null,2);
+  return JSON.stringify({format:"vault-extension-capture-v2",sourcePage:currentTab?.url||"",items},null,2);
 }
 copyBtn.addEventListener("click", async () => {
   const items=selectedItems();
   try {
     await navigator.clipboard.writeText(makePayload(items));
-    statusEl.textContent="Copied "+items.length+" links. Paste them into Vault → Import Media → Import from your browser.";
+    statusEl.textContent="Copied "+items.length+" captured links as JSON for backup.";
   } catch (error) {statusEl.textContent="Copy failed: "+(error.message||"Clipboard unavailable");}
 });
 function safeVaultOrigin(raw) {
@@ -187,15 +187,12 @@ sendBtn.addEventListener("click",async()=>{
   if(!items.length)return;
   sendBtn.disabled=true;
   try{
-    // Clipboard copy is the fallback when a user must sign in before the
-    // existing Vault form can be populated by the extension.
-    await navigator.clipboard.writeText(makePayload(items)).catch(()=>{});
     const response=await chrome.runtime.sendMessage({
       type:"VAULT_OPEN_PICKER",
       items,origin:safeVaultOrigin(vaultUrlInput.value)||DEFAULT_VAULT,
     });
-    if(!response?.ok)throw new Error(response?.error||"Could not open the Vault importer.");
-    statusEl.textContent="Opening Vault with "+response.count+" items. Review them, then press Save selected in Vault. If you need to sign in, paste the copied list afterward.";
+    if(!response?.ok)throw new Error(response?.error||"Could not open the Vault folder picker.");
+    statusEl.textContent="Opened folder picker for "+response.count+" items. Choose a collection, then save in Vault.";
   }catch(error){statusEl.textContent="Send failed: "+(error?.message||"Unknown error")+". Use Copy selected instead.";}
   finally{updateStatus();}
 });
