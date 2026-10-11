@@ -1,0 +1,27 @@
+name: Vault capture quality
+on:
+  push:
+    branches:
+      - feat/chrome-folder-picker-bulk-capture-20261010
+  pull_request:
+    paths:
+      - "extensions/vault-media-capture/**"
+      - "app/capture/**"
+      - "components/ExtensionCapture.jsx"
+      - "lib/capture.js"
+      - "tests/**"
+      - ".github/workflows/vault-capture.yml"
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
