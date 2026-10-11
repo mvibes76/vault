@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm install --package-lock=false --registry=https://registry.npmjs.org --no-audit --no-fund
       - run: npm test
       - run: npm run lint
       - run: npm run build
