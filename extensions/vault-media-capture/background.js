@@ -171,10 +171,10 @@ async function deliver(tabId) {
     }
   } finally { running.delete(tabId); }
 }
-async function openFolderPicker(items) {
+async function openFolderPicker(items, requestedOrigin) {
   const cleaned = cleanSelection(items);
   if (!cleaned.length) throw new Error("Choose an image or gallery before saving.");
-  const origin = await vaultOrigin();
+  const origin = safeVaultOrigin(requestedOrigin) || await vaultOrigin();
   const browserWindow = await chrome.windows.create({
     url: origin + "/capture", type: "popup", width: 760, height: 820, focused: true,
   });
@@ -225,7 +225,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 chrome.runtime.onMessage.addListener((message,sender,sendResponse) => {
   if (message?.type !== "VAULT_OPEN_PICKER") return;
-  openFolderPicker(message.items).then(sendResponse)
+  openFolderPicker(message.items,message.origin).then(sendResponse)
     .catch(error => sendResponse({ok:false,error:error.message || "Could not open Vault."}));
   return true;
 });
