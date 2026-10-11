@@ -1,6 +1,7 @@
 "use client";
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {supabase} from "@/lib/supabase";
+import Link from "next/link";
 import {captureKey,normalizeCapture} from "@/lib/capture";
 
 const PENDING="vault:extension-capture-v2";
@@ -44,7 +45,7 @@ export default function ExtensionCapture() {
     window.__vaultCaptureImport=receive;
     try{
       const saved=JSON.parse(sessionStorage.getItem(PENDING)||"null");
-      if(saved?.expiry>Date.now())receive(saved.payload);
+      if(saved?.expiry>Date.now())queueMicrotask(()=>receive(saved.payload));
       else sessionStorage.removeItem(PENDING);
     }catch{sessionStorage.removeItem(PENDING);}
     return ()=>{if(window.__vaultCaptureImport===receive)delete window.__vaultCaptureImport;};
@@ -184,7 +185,7 @@ export default function ExtensionCapture() {
         {saving?"Saving…":"Save "+items.length+" item"+(items.length===1?"":"s")+" to "+(folder||"Inbox")}
       </button>
       <p style={{fontSize:11,color:"#777",lineHeight:1.65}}>This saves image URLs, not permanent originals. Images protected by 403 responses or expiring addresses may not open in Vault.</p>
-      <a style={{color:"#ddd",fontSize:12}} href="/">Open Vault library</a>
+      <Link style={{color:"#ddd",fontSize:12}} href="/">Open Vault library</Link>
     </div>
   </main>;
 }
